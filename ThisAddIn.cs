@@ -15,7 +15,9 @@ namespace Ask.ai
                 .CreateRibbonManager(
                     new Microsoft.Office.Tools.Ribbon.IRibbonExtension[]
                     {
-                        new AiMailRibbon()
+                        new AiMailRibbon(),
+                        new AiReadRibbon(),
+                        new AiComposeRibbon()
                     });
         }
 

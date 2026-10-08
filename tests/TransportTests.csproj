@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!-- Linked production adapter is Windows-only; this runner supplies non-COM Office objects.
+         Real COM lifetime and VSTO compilation are checked separately on Windows. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="MailGenerationTests.cs" />
+    <Compile Include="OutlookAdapterTests.cs" />
+    <Compile Include="OfficeSimulation.cs" />
+    <Compile Include="../OutlookMailTarget.cs" />
+    <Compile Include="LegacyTransportTests.cs" />
+    <Compile Include="../LegacyAiService.cs" />
+    <Compile Include="../MailGeneration.cs" />
+    <Compile Include="../CentralAiService.cs" />
+    <Compile Include="../AppConfig.cs" />
+  </ItemGroup>
+</Project>

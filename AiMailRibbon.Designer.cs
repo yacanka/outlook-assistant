@@ -12,6 +12,7 @@ namespace Ask.ai
             : base(Globals.Factory.GetRibbonFactory())
         {
             InitializeComponent();
+            InitializeAiSettingsButton();
         }
 
         protected override void Dispose(bool disposing)
