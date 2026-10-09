@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -54,6 +55,12 @@ internal static class ConnectionDiagnosticsTests
                 handler.Error = new HttpRequestException("Synthetic transport detail", new AuthenticationException("Handshake failed"));
                 error = await ReadFailure(send);
                 Check(error.Message.Contains("TLS"), "ambiguous handshake failure is diagnosed as TLS");
+                handler.Error = new HttpRequestException("Synthetic transport detail",
+                    new WebException("Synthetic private detail", new Win32Exception(unchecked((int)0x80090326)),
+                        WebExceptionStatus.SecureChannelFailure, null));
+                error = await ReadFailure(send);
+                Check(error.Message.Contains("0x80090326") && !error.Message.Contains("private"),
+                    "native TLS diagnostic code reaches UI without private exception text");
 
                 handler.Error = new HttpRequestException("Synthetic transport detail", new SocketException((int)SocketError.HostNotFound));
                 error = await ReadFailure(send);

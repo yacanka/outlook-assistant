@@ -12,11 +12,9 @@ namespace Askai
 {
     public sealed class CentralAiService
     {
-        private static readonly HttpClient SharedClient = new HttpClient(
-            new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
         private readonly HttpClient client;
 
-        public CentralAiService() : this(SharedClient) { }
+        public CentralAiService() : this(AiHttpTransport.GetClient(false)) { }
         public CentralAiService(HttpClient client) { this.client = client ?? throw new ArgumentNullException(nameof(client)); }
 
         public async Task<string> SendAsync(string prompt, string model, string token,

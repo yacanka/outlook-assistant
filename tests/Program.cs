@@ -13,6 +13,8 @@ class Program
     static async Task Main()
     {
         MailGenerationTests.Run();
+        TlsPolicyTests.Run();
+        ServerCertificateTests.Run();
         OutlookAdapterTests.Run();
         await LegacyTransportTests.Run();
         AppConfig.CentralApiUrl = "https://example.invalid/chat";

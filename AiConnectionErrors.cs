@@ -1,4 +1,6 @@
 using System;
+using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -72,7 +74,7 @@ namespace Askai
                 {
                     if (web.Status == WebExceptionStatus.TrustFailure)
                         return new AiServiceException(provider +
-                            " AI: Windows sunucu sertifikasını doğrulayamadı. Sertifika zincirini, geçerlilik süresini ve adres eşleşmesini BT ile kontrol edin.", error);
+                            " AI: Windows sunucu sertifikasını doğrulayamadı. Sertifika zincirini, geçerlilik süresini ve adres eşleşmesini BT ile kontrol edin." + NativeErrorDetail(error), error);
                     tls |= web.Status == WebExceptionStatus.SecureChannelFailure;
                     dns |= web.Status == WebExceptionStatus.NameResolutionFailure
                         || web.Status == WebExceptionStatus.ProxyNameResolutionFailure;
@@ -85,12 +87,23 @@ namespace Askai
             }
             if (tls)
                 return new AiServiceException(provider +
-                    " AI: TLS güvenli bağlantısı kurulamadı. Windows ve sunucunun TLS ayarlarını, sertifika zincirini ve kurumsal proxy'yi kontrol edin.", error);
+                    " AI: TLS güvenli bağlantısı kurulamadı. Windows ve sunucunun TLS ayarlarını, sertifika zincirini ve kurumsal proxy'yi kontrol edin." + NativeErrorDetail(error), error);
             if (dns)
                 return new AiServiceException(provider +
                     " AI: DNS çözümlemesi başarısız. Servis/proxy adresini ve VPN bağlantısını kontrol edin.", error);
             return new AiServiceException(provider +
                 " AI: Servise bağlantı kurulamadı. Servisin çalıştığını, ağ/VPN, proxy ve güvenlik duvarı erişimini kontrol edin.", error);
+        }
+
+        private static string NativeErrorDetail(Exception error)
+        {
+            for (Exception cause = error; cause != null; cause = cause.InnerException)
+            {
+                var native = cause as Win32Exception;
+                if (native != null)
+                    return " Windows hata kodu: 0x" + native.NativeErrorCode.ToString("X8", CultureInfo.InvariantCulture) + ".";
+            }
+            return "";
         }
     }
 }

@@ -13,6 +13,8 @@ namespace Askai
         public AiProvider Provider { get; set; } = AiProvider.Central;
         public string Model { get; set; } = "";
         public string Token { get; set; } = "";
+        public bool UseTls12 { get; set; }
+        public string CentralServerCertificate { get; set; } = "";
         private static string SettingsPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Askai", "settings.xml");
 
@@ -29,6 +31,8 @@ namespace Askai
                 return new AiSettings {
                     Provider = provider,
                     Model = (string)root.Element("Model") ?? "",
+                    UseTls12 = (bool?)root.Element("UseTls12") ?? false,
+                    CentralServerCertificate = (string)root.Element("CentralServerCertificate") ?? "",
                     Token = encrypted.Length == 0 ? "" : Encoding.UTF8.GetString(ProtectedData.Unprotect(
                         Convert.FromBase64String(encrypted), null, DataProtectionScope.CurrentUser))
                 };
@@ -45,7 +49,9 @@ namespace Askai
             string encrypted = string.IsNullOrEmpty(Token) ? "" : Convert.ToBase64String(
                 ProtectedData.Protect(Encoding.UTF8.GetBytes(Token), null, DataProtectionScope.CurrentUser));
             var root = new XElement("AiSettings", new XElement("Provider", Provider),
-                new XElement("Model", Model), new XElement("Token", encrypted));
+                new XElement("Model", Model), new XElement("Token", encrypted),
+                new XElement("UseTls12", UseTls12),
+                new XElement("CentralServerCertificate", CentralServerCertificate));
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath));
             string temporary = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try

@@ -12,11 +12,9 @@ namespace Askai
     public class LegacyAiService
     {
         private const int MaxBytes = 1024 * 1024;
-        private static readonly HttpClient SharedClient = new HttpClient(
-            new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
         private readonly HttpClient client;
 
-        public LegacyAiService() : this(SharedClient) { }
+        public LegacyAiService() : this(AiHttpTransport.GetClient(false, forLegacy: true)) { }
         public LegacyAiService(HttpClient client) { this.client = client ?? throw new ArgumentNullException(nameof(client)); }
 
         /// <summary>

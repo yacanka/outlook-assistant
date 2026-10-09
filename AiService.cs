@@ -11,8 +11,11 @@ namespace Askai
         {
             var settings = AiSettings.Load();
             if (settings.Provider == AiProvider.Legacy)
-                return new LegacyAiService().SendStreamingRequestAsync(userPrompt, onChunk, cancellationToken);
-            return new CentralAiService().SendAsync(userPrompt, settings.Model, settings.Token, onChunk, cancellationToken);
+                return new LegacyAiService(AiHttpTransport.GetClient(settings.UseTls12, forLegacy: true))
+                    .SendStreamingRequestAsync(userPrompt, onChunk, cancellationToken);
+            return new CentralAiService(AiHttpTransport.GetClient(settings.UseTls12,
+                    serverCertificateBase64: settings.CentralServerCertificate))
+                .SendAsync(userPrompt, settings.Model, settings.Token, onChunk, cancellationToken);
         }
     }
 }
