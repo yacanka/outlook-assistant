@@ -15,6 +15,7 @@ class Program
         MailGenerationTests.Run();
         TlsPolicyTests.Run();
         ServerCertificateTests.Run();
+        CertificateChainTests.Run();
         OutlookAdapterTests.Run();
         await LegacyTransportTests.Run();
         AppConfig.CentralApiUrl = "https://example.invalid/chat";

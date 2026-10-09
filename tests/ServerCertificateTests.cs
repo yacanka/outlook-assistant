@@ -75,7 +75,8 @@ internal static class ServerCertificateTests
                 Throws<AiServiceException>(() => ServerCertificateTrust.FromFile(file));
                 File.WriteAllText(file, "-----BEGIN CERTIFICATE-----\n" + encoded + "\n-----END CERTIFICATE-----\n" +
                     "-----BEGIN CERTIFICATE-----\n" + encoded + "\n-----END CERTIFICATE-----\n");
-                Throws<AiServiceException>(() => ServerCertificateTrust.FromFile(file));
+                Check(ServerCertificateTrust.FromFile(file).CertificateCount == 1
+                    && ServerCertificateTrust.FromFile(file).Fingerprint == trust.Fingerprint, "duplicate public certificates normalize safely");
                 File.WriteAllBytes(file, new byte[65537]);
                 Throws<AiServiceException>(() => ServerCertificateTrust.FromFile(file));
             }

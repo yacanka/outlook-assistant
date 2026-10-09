@@ -14,7 +14,8 @@ namespace Askai
                 return new LegacyAiService(AiHttpTransport.GetClient(settings.UseTls12, forLegacy: true))
                     .SendStreamingRequestAsync(userPrompt, onChunk, cancellationToken);
             return new CentralAiService(AiHttpTransport.GetClient(settings.UseTls12,
-                    serverCertificateBase64: settings.CentralServerCertificate))
+                    serverCertificateBase64: settings.ActiveCentralCertificate,
+                    certificateTrustMode: settings.CentralCertificateTrustMode))
                 .SendAsync(userPrompt, settings.Model, settings.Token, onChunk, cancellationToken);
         }
     }

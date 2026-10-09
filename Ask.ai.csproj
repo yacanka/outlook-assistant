@@ -208,6 +208,7 @@
     <Compile Include="AiConnectionErrors.cs" />
     <Compile Include="AiHttpTransport.cs" />
     <Compile Include="ServerCertificateTrust.cs" />
+    <Compile Include="CertificateMaterial.cs" />
     <Compile Include="AiSettings.cs" />
     <Compile Include="AiSettingsForm.cs" />
     <Compile Include="ProgressForm.cs">

@@ -85,56 +85,73 @@ açmayı, eski ayar kaydını yüklemeyi, modu kapatmayı ve gerçek API çağr�
 doğrulayın. DPAPI ayar kaydı, VSTO arayüzü ve gerçek TLS el sıkışması bu macOS
 test ortamında doğrulanmaz.
 
-### Manuel Central sunucu sertifikası
+### Manuel Central sertifika güveni
 
-**AI Ayarları → Central sunucu sertifikası → Sertifika seç… → Kaydet** ile BT'den
-alınan sunucu sertifikası seçilebilir. Desteklenen dosyalar en fazla 64 KiB olan,
-tek bir açık sunucu sertifikası içeren DER veya PEM `.cer/.crt` dosyalarıdır.
-PEM'de UTF-8 BOM desteklenir. PFX/P12, özel anahtar ve çoklu sertifika paketleri
-desteklenmez; parola alanı veya istemci/mTLS sertifikası eklenmez.
+**AI Ayarları → Central sertifika modu → Sertifika seç… → Kaydet** üzerinden iki
+ayrı mod kullanılabilir:
 
-Arayüz sunucu adını, son geçerlilik tarihini ve SHA-256 parmak izini gösterir.
-Kaydet yalnızca sertifikanın açık DER verisini ayarlara ekler; dosya yolu ve özel
-anahtar kaydedilmez. Token'ın DPAPI şifrelemesi korunur. Seçilen dosyanın daha
-sonra değiştirilmesi ayarı değiştirmez; yeni sertifika arayüzden yeniden seçilip
-kaydedilmelidir. İptal/pencereyi kapatma değişiklikleri kaydetmez.
+- **CA zincirine güven:** Yalnızca kök ve isteğe bağlı ara CA sertifikaları seçilir.
+  Bağlantıda sunucu sertifikasının yüklenen köke uzanan geçerli zinciri aranır.
+  Aynı kökten verilen yenilenmiş sunucu sertifikaları da kabul edilir.
+- **Sunucu + ara/kök zinciri:** Sunucu sertifikası ile ara ve kök sertifikaları
+  birlikte seçilir. Geçerli zincir aynı yüklenen kökte sonlanmalı ve sunucunun
+  sunduğu sertifikanın tamamı yüklenen sunucu sertifikasıyla birebir eşleşmelidir.
+  Sunucu sertifikası yenilenince bu modda yeniden seçilmelidir. Önceki sürümdeki
+  tek sunucu sertifikası seçimi de desteklenmeye devam eder.
 
-Seçim yapılınca Central bağlantısında sunucunun sunduğu **sertifikanın tamamı**
-seçilen sertifikayla birebir eşleşmelidir. Windows başka bir sertifikaya güvense
-bile farklı sertifika kabul edilmez. Sertifika sunucuda yenilendiğinde yeni
-sertifikayı seçin. Bu alan kök/ara CA'ya genel güven vermek için değildir;
-bağlanılan sunucunun sertifikasını seçin. Legacy bu ayarı kullanmaz.
+Dosya seçicisinde birden fazla `.cer/.crt` dosyası seçilebilir. DER veya birden
+fazla CERTIFICATE bloğu içeren PEM verisi desteklenir; PEM'de UTF-8 BOM kabul
+edilir. Dosya uzantısı yalnızca `.cer/.crt` olabilir; `.pem`, PFX/P12, PKCS#7,
+özel anahtar ve istemci/mTLS sertifikası desteklenmez. En fazla 16 sertifika,
+toplam 256 KiB dosya ve tek sertifika için 64 KiB sınırı vardır. Yinelenen
+sertifikalar birleştirilir; dosya sırası sonucu değiştirmez.
 
-Eşleşen sertifika için yalnızca `UntrustedRoot` / `PartialChain` güven zinciri
-eksiklikleri yerel açık güvenle karşılanır. Adres uyuşmazlığı, geçersiz süre,
-sunucu kullanımına uygun olmayan EKU/key usage, imza, iptal, bilinmeyen veya
-diğer zincir hataları kabul edilmez. Manuel seçimde HTTP istemcisi Windows'tan
-iptal kontrolü ister (`CheckCertificateRevocationList = true`); CRL/OCSP kontrolü
-belirsiz veya çevrimdışı kalırsa bağlantı reddedilir. Böyle bir durumda iptal
-kontrolü altyapısının erişimini BT/servis yöneticisiyle doğrulayın.
+Yeni zincir seçimlerinde tek bir kök gerekir. Eksik kök, ilgisiz sertifikalar,
+farklı kökler ve geçersiz imzalar reddedilir. CA modunda sunucu sertifikası
+seçilmez. Sunucu zinciri modunda tam olarak bir sunucu sertifikası gerekir.
+CA zinciri seçiminde yalnızca kök de yüklenebilir; bağlantıda ara sertifikalar
+sunucudan veya Windows zincir oluşturucusundan tamamlanabilir. Oluşan zincir
+mutlaka yüklenen kökte sonlanmalıdır. Alternatif/cross-signed yolların Windows
+başka bir kökte sonlandırdığı durumlar da güvenli biçimde reddedilir.
 
-Windows sertifika deposu, registry, kurumsal proxy veya Outlook'un genel TLS
-ayarları değiştirilmez. TLS 1.2 uyumluluk modu ayrı bir seçenektir; sunucu
-sertifikası seçimi protokol/cipher uyumsuzluğunu çözmez. **Temizle → Kaydet** normal
-Windows güven doğrulamasına döndürür. Önceki ayar kayıtlarında sertifika alanı
-yoksa manuel güven etkin değildir.
+Her modun sertifikaları ayrı saklanır. Mod değiştirmek diğer modun sertifikalarını
+silmez veya yeniden yorumlamaz. **Temizle → Kaydet** yalnızca seçili modu temizler;
+aktif modda sertifika yoksa normal Windows doğrulaması kullanılır. Arayüz zincir
+sayısını, kök adını ve SHA-256 parmak izini gösterir. Kaydet açık sertifika verisini
+saklar; dosya yolu veya özel anahtar kaydedilmez. Token'ın DPAPI şifrelemesi
+korunur. Dosyayı sonradan değiştirmek kaydı değiştirmez; yeni dosyalar yeniden
+seçilmelidir. İptal/pencereyi kapatma değişiklikleri kaydetmez. Eski ayar kayıtları
+sunucu modunda açılır. Legacy bu sertifika ayarlarını kullanmaz.
 
-Sertifika/TLS modu başına ayrı havuz kullanılır. Mevcut isteği iptal etmeden yeni
-ayarlar sonraki isteğe uygulanır; seçili sertifikanın süresi her istekte yeniden
-kontrol edilir. Kaynakları sınırlamak için bir Outlook oturumunda en fazla 16
-farklı manuel sertifika/TLS havuzu oluşturulur; limite ulaşılırsa arayüz yeniden
-başlatma gerektiğini bildirir.
+Seçim sırasında zincirin yapısı ve imzaları iptal servisine ihtiyaç olmadan
+kontrol edilir. Native zincir oluşturucusu AIA sorgusu yapabilir; erişilemeyen
+AIA adresleri seçim sırasında beklemeye neden olabilir. Yükleme sırasında
+oluşan yolun bütün elemanları seçilen dosyalarda bulunmalıdır. Canlı bağlantıda
+yeni zincir modları `Online` iptal kontrolüyle
+zinciri yeniden oluşturur. Yalnızca seçilen kökün Windows tarafından tanınmaması
+(`UntrustedRoot`) karşılanır; `PartialChain` kabul edilmez. Eski tek sunucu
+sertifikası modunda birebir eşleşme koşuluyla önceki `UntrustedRoot` / `PartialChain`
+davranışı korunur. Manuel güvende HTTP istemcisinin iptal kontrolü de açıktır.
+Adres uyuşmazlığı, süre, EKU/key usage, imza, iptal, belirsiz/çevrimdışı iptal
+kontrolü ve diğer zincir hataları bağlantıyı reddeder. CRL/OCSP erişimi başarısızsa
+BT/servis yöneticisiyle iptal kontrolü altyapısını doğrulayın.
 
-Testler üretilmiş açık sertifikalarla birebir eşleşmeyi, yanlış adres bayrağını,
-tarih/EKU/zincir hata kısıtlarını, DER/PEM okumayı, dosya limitlerini, handler'da
-iptal kontrolünün açılmasını ve havuz ayrımını doğrular. macOS sandbox'ında native
-SecTrust API'si kullanılamadığı için sertifika testleri normal macOS erişimiyle
-çalıştırılır; güven deposuna sertifika eklenmez. Bunlar gerçek Windows Schannel,
-CRL/OCSP erişimi veya canlı API doğrulaması yerine geçmez.
+Windows sertifika deposu, registry, kurumsal proxy ve Outlook'un genel TLS
+ayarları değiştirilmez. TLS 1.2 uyumluluk modu ayrı seçenektir; sertifika seçimi
+protokol/cipher uyumsuzluğunu çözmez. TLS seçimi, güven modu ve sertifika parmak
+izi başına ayrı bağlantı havuzu kullanılır. Ayar değişikliği devam eden isteği
+iptal etmez; sonraki isteğe uygulanır. Bir Outlook oturumunda en fazla 16 farklı
+manuel güven/TLS havuzu oluşturulur; limitte yeniden başlatma gerektiği bildirilir.
 
-Windows'ta ayrıca sertifika seç/kaydet/yeniden aç/temizle, eski ayar kaydı,
-sertifika yenilenmesi, adres uyuşmazlığı, iptal edilmiş sertifika ve erişilemeyen
-iptal kontrolü senaryolarını gerçek test servisiyle doğrulayın.
+Testler üretilmiş açık sertifikalarla CA/sunucu modlarını, yenilenmeyi, kök/imza
+kontrollerini, adres bayraklarını, DER/çoklu PEM okumayı, dosya sınırlarını,
+ayar uyumluluğunu ve havuz ayrımını doğrular. Pozitif zincir testleri çevrimdışı
+yapı doğrulamasıdır; canlı iptal kontrolünün yerine geçmez. macOS sandbox'ında
+native SecTrust API'si kullanılamadığı için sertifika testleri normal macOS
+erişimiyle çalıştırılır; güven deposuna sertifika eklenmez. Windows'ta gerçek
+Schannel bağlantısı, sertifika seç/kaydet/yeniden aç/temizle, mod değiştirme,
+sertifika yenilenmesi, iptal edilmiş sertifika ve erişilemeyen CRL/OCSP senaryoları
+ayrıca doğrulanmalıdır.
 
 ## Mail yetenekleri
 

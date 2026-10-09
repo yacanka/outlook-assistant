@@ -17,12 +17,14 @@
     <Compile Include="ConnectionDiagnosticsTests.cs" />
     <Compile Include="TlsPolicyTests.cs" />
     <Compile Include="ServerCertificateTests.cs" />
+    <Compile Include="CertificateChainTests.cs" />
     <Compile Include="../LegacyAiService.cs" />
     <Compile Include="../MailGeneration.cs" />
     <Compile Include="../CentralAiService.cs" />
     <Compile Include="../AiConnectionErrors.cs" />
     <Compile Include="../AiHttpTransport.cs" />
     <Compile Include="../ServerCertificateTrust.cs" />
+    <Compile Include="../CertificateMaterial.cs" />
     <Compile Include="../AppConfig.cs" />
   </ItemGroup>
 </Project>

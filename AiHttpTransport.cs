@@ -19,14 +19,15 @@ namespace Askai
 
         // Pools are separate by provider and TLS mode: changing settings must not reuse a
         // connection negotiated with the previous policy or share provider cookie state.
-        public static HttpClient GetClient(bool useTls12, bool forLegacy = false, string serverCertificateBase64 = null)
+        public static HttpClient GetClient(bool useTls12, bool forLegacy = false, string serverCertificateBase64 = null,
+            CertificateTrustMode certificateTrustMode = CertificateTrustMode.ServerCertificate)
         {
             if (!string.IsNullOrEmpty(serverCertificateBase64))
             {
                 if (forLegacy)
                     throw new AiServiceException("Manuel sunucu sertifikası yalnızca Central HTTPS bağlantısında kullanılabilir.");
                 // Revalidate lifetime on every request, including reuse of an existing TLS connection.
-                var trust = ServerCertificateTrust.FromBase64(serverCertificateBase64);
+                var trust = ServerCertificateTrust.FromBase64(serverCertificateBase64, certificateTrustMode);
                 return GetCertificateClient(useTls12, trust);
             }
             if (forLegacy) return (useTls12 ? legacyTls12 : legacyDefault).Value;
@@ -35,7 +36,7 @@ namespace Askai
 
         private static HttpClient GetCertificateClient(bool useTls12, ServerCertificateTrust trust)
         {
-            string key = (useTls12 ? "tls12:" : "default:") + trust.Fingerprint;
+            string key = (useTls12 ? "tls12:" : "default:") + trust.Mode + ":" + trust.Fingerprint;
             Lazy<HttpClient> client;
             lock (certificatePoolLock)
             {

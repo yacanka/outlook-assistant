@@ -1,177 +1,240 @@
 using System;
 using System.Globalization;
-using System.IO;
+using System.Linq;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 
 namespace Askai
 {
+    public enum CertificateTrustMode { ServerCertificate, CertificateAuthority }
+
     /// <summary>
-    /// Explicit trust in one public server certificate, scoped to an AI HTTP handler.
-    /// Exact DER identity, hostname, lifetime, server usage and non-trust chain errors
-    /// remain enforced. This neither imports a CA nor changes Windows trust stores.
+    /// Handler-scoped public trust. CA mode requires a full path to the uploaded root.
+    /// Server mode additionally pins its leaf; legacy single-leaf data keeps its original behavior.
+    /// No system trust stores or global TLS policies are modified.
     /// </summary>
     internal sealed class ServerCertificateTrust
     {
-        private const int MaxCertificateBytes = 65536;
-        private const string PemStart = "-----BEGIN CERTIFICATE-----";
-        private const string PemEnd = "-----END CERTIFICATE-----";
-        private readonly byte[] expectedCertificate;
-        private readonly DateTime validFromUtc;
-        private readonly DateTime validUntilUtc;
-        public string Fingerprint { get; }
+        private readonly CertificateMaterial material;
+        private readonly byte[] pinnedServer;
+        private readonly byte[] trustedRoot;
+        private readonly bool legacySingleLeaf;
+        public CertificateTrustMode Mode { get; }
+        public int CertificateCount => material.Count;
+        public string Fingerprint => material.Fingerprint;
         public string Description { get; }
-        public string EncodedCertificate => Convert.ToBase64String(expectedCertificate);
+        public string EncodedCertificate => material.Encoded;
 
-        private ServerCertificateTrust(X509Certificate2 certificate)
+        private ServerCertificateTrust(CertificateMaterial material, CertificateTrustMode mode)
         {
-            expectedCertificate = certificate.RawData;
-            validFromUtc = certificate.NotBefore.ToUniversalTime();
-            validUntilUtc = certificate.NotAfter.ToUniversalTime();
-            using (var hash = SHA256.Create())
-                Fingerprint = BitConverter.ToString(hash.ComputeHash(expectedCertificate)).Replace("-", "");
-            Description = "Sunucu: " + certificate.GetNameInfo(X509NameType.DnsName, false)
-                + "\r\nSon geçerlilik: " + certificate.NotAfter.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)
-                + "\r\nSHA-256: " + Fingerprint;
+            if (!Enum.IsDefined(typeof(CertificateTrustMode), mode)) throw InvalidChain();
+            this.material = material;
+            Mode = mode;
+            legacySingleLeaf = mode == CertificateTrustMode.ServerCertificate && material.Count == 1;
+            using (var opened = material.Open())
+            {
+                var certificates = opened.Certificates.Cast<X509Certificate2>().ToArray();
+                foreach (var certificate in certificates) RequireCurrent(certificate);
+                if (legacySingleLeaf)
+                {
+                    if (!HasServerUsage(certificates[0])) throw InvalidChain();
+                    pinnedServer = certificates[0].RawData;
+                    Description = "Sunucu: " + certificates[0].GetNameInfo(X509NameType.DnsName, false)
+                        + "\r\nSon geçerlilik: " + certificates[0].NotAfter.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)
+                        + "\r\nSHA-256: " + Fingerprint;
+                    return;
+                }
+
+                var authorities = certificates.Where(IsAuthority).ToArray();
+                var roots = authorities.Where(IsRoot).ToArray();
+                if (roots.Length != 1) throw InvalidChain();
+                trustedRoot = roots[0].RawData;
+                foreach (var authority in authorities)
+                    if (!HasAuthorityUsage(authority)) throw InvalidChain();
+                var servers = certificates.Where(cert => !IsAuthority(cert)).ToArray();
+                if (mode == CertificateTrustMode.CertificateAuthority && servers.Length != 0) throw InvalidChain();
+                if (mode == CertificateTrustMode.ServerCertificate)
+                {
+                    if (servers.Length != 1 || !HasServerUsage(servers[0])) throw InvalidChain();
+                    pinnedServer = servers[0].RawData;
+                }
+                // Selection checks topology/signatures without revocation; live TLS checks revocation online.
+                foreach (var certificate in certificates) RequirePathToRoot(certificate, opened.Certificates);
+                Description = "Mod: " + (mode == CertificateTrustMode.CertificateAuthority ? "CA zincirine güven" : "Sunucu + ara/kök zinciri")
+                    + "\r\nSertifika sayısı: " + material.Count
+                    + "\r\nKök CA: " + roots[0].GetNameInfo(X509NameType.SimpleName, false)
+                    + (servers.Length == 1 ? "\r\nSunucu: " + servers[0].GetNameInfo(X509NameType.DnsName, false) : "")
+                    + "\r\nZincir SHA-256: " + Fingerprint;
+            }
+        }
+
+        public static CertificateTrustMode ParseMode(string text)
+        {
+            if (text == null) return CertificateTrustMode.ServerCertificate;
+            CertificateTrustMode mode;
+            if (!Enum.TryParse(text, out mode) || !Enum.IsDefined(typeof(CertificateTrustMode), mode)) throw new FormatException();
+            return mode;
         }
 
         public static ServerCertificateTrust FromFile(string path)
         {
-            try
+            return FromFiles(new[] { path }, CertificateTrustMode.ServerCertificate);
+        }
+        public static ServerCertificateTrust FromFiles(string[] paths, CertificateTrustMode mode)
+        {
+            return Create(CertificateMaterial.FromFiles(paths), mode);
+        }
+        public static ServerCertificateTrust FromBase64(string encoded, CertificateTrustMode mode = CertificateTrustMode.ServerCertificate)
+        {
+            return Create(CertificateMaterial.FromBase64(encoded), mode);
+        }
+
+        private static ServerCertificateTrust Create(CertificateMaterial material, CertificateTrustMode mode)
+        {
+            try { return new ServerCertificateTrust(material, mode); }
+            catch (CryptographicException ex)
             {
-                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-                {
-                    // Read at most the limit plus one byte, even if a file changes size.
-                    var bytes = new byte[MaxCertificateBytes + 1];
-                    int length = 0;
-                    int count;
-                    while (length < bytes.Length && (count = stream.Read(bytes, length, bytes.Length - length)) > 0)
-                        length += count;
-                    if (length > MaxCertificateBytes) throw InvalidCertificate();
-                    Array.Resize(ref bytes, length);
-                    return FromBytes(DecodePem(bytes));
-                }
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException)
-            {
-                throw new AiServiceException("Sunucu sertifikası dosyası okunamadı. Erişilebilir bir .cer veya .crt dosyası seçin.", ex);
+                throw new AiServiceException("Sertifika zinciri doğrulanamadı. Geçerli .cer/.crt sertifikaları seçin.", ex);
             }
         }
 
-        public static ServerCertificateTrust FromBase64(string encoded)
+        private void RequirePathToRoot(X509Certificate2 certificate, X509Certificate2Collection certificates)
+        {
+            using (var validation = CreateValidationChain())
+            {
+                validation.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck; // Import does not authenticate a live connection.
+                validation.ChainPolicy.ExtraStore.AddRange(certificates);
+                validation.Build(certificate);
+                if (!IsAnchoredPath(certificate, validation, false)) throw InvalidChain();
+                // ExtraStore is not exclusive: Windows may complete paths from its cache/store/AIA.
+                // Import must remain portable and validate only the selected public material.
+                foreach (var element in validation.ChainElements)
+                    if (!certificates.Cast<X509Certificate2>().Any(selected => Equal(selected.RawData, element.Certificate.RawData)))
+                        throw InvalidChain();
+            }
+        }
+
+        public X509Chain CreateValidationChain()
+        {
+            var validation = new X509Chain();
+            validation.ChainPolicy.RevocationMode = X509RevocationMode.Online;
+            validation.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
+            validation.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
+            validation.ChainPolicy.ApplicationPolicy.Add(new Oid("1.3.6.1.5.5.7.3.1"));
+            validation.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(5);
+            return validation;
+        }
+
+        public bool Validate(X509Certificate2 certificate, X509Chain peerChain, SslPolicyErrors errors)
+        {
+            if (certificate == null || (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) != SslPolicyErrors.None)
+                return false; // Native hostname mismatch and missing/unknown peer errors must never be overridden.
+            try
+            {
+                if (legacySingleLeaf)
+                    return ValidateBuiltChain(certificate, peerChain)
+                        && (errors == SslPolicyErrors.None || peerChain.ChainStatus.Any(status => status.Status != X509ChainStatusFlags.NoError));
+                using (var opened = material.Open())
+                using (var validation = CreateValidationChain())
+                {
+                    validation.ChainPolicy.ExtraStore.AddRange(opened.Certificates);
+                    if (peerChain != null)
+                        foreach (var element in peerChain.ChainElements) validation.ChainPolicy.ExtraStore.Add(element.Certificate);
+                    validation.Build(certificate);
+                    return ValidateBuiltChain(certificate, validation);
+                }
+            }
+            catch (CryptographicException) { return false; }
+            catch (InvalidOperationException) { return false; }
+            catch (AiServiceException) { return false; }
+        }
+
+        // Also used with offline topology fixtures. The live callback always supplies a rebuilt Online chain.
+        public bool ValidateBuiltChain(X509Certificate2 certificate, X509Chain chain)
         {
             try
             {
-                if (encoded == null || encoded.Length > ((MaxCertificateBytes + 2) / 3 * 4) + 4096)
-                    throw InvalidCertificate();
-                return FromBytes(Convert.FromBase64String(encoded));
-            }
-            catch (FormatException ex) { throw new AiServiceException("Kaydedilmiş sunucu sertifikası okunamadı. Yeniden seçin veya temizleyin.", ex); }
-        }
-
-        private static byte[] DecodePem(byte[] bytes)
-        {
-            int offset = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
-            string text = Encoding.ASCII.GetString(bytes, offset, bytes.Length - offset).Trim();
-            if (!text.StartsWith(PemStart, StringComparison.Ordinal)) return bytes;
-            if (!text.EndsWith(PemEnd, StringComparison.Ordinal)) throw InvalidCertificate();
-            try
-            {
-                // Exactly one certificate: multiple blocks or other PEM objects fail base64 decoding.
-                return Convert.FromBase64String(text.Substring(PemStart.Length, text.Length - PemStart.Length - PemEnd.Length));
-            }
-            catch (FormatException ex) { throw new AiServiceException("Dosya tek bir geçerli sunucu sertifikası içermelidir.", ex); }
-        }
-
-        private static ServerCertificateTrust FromBytes(byte[] bytes)
-        {
-            try
-            {
-                if (bytes.Length == 0 || bytes.Length > MaxCertificateBytes
-                    || X509Certificate2.GetCertContentType(bytes) != X509ContentType.Cert)
-                    throw InvalidCertificate();
-                // This public-certificate constructor is required by the .NET Framework 4.7.2 target.
-#pragma warning disable SYSLIB0057
-                using (var certificate = new X509Certificate2(bytes))
-#pragma warning restore SYSLIB0057
-                {
-                    if (certificate.HasPrivateKey || certificate.RawData.Length != bytes.Length) throw InvalidCertificate();
-                    DateTime now = DateTime.UtcNow;
-                    if (now < certificate.NotBefore.ToUniversalTime() || now > certificate.NotAfter.ToUniversalTime())
-                        throw new AiServiceException("Sunucu sertifikası henüz geçerli değil veya süresi dolmuş. Geçerli sertifikayı seçin ve Windows saatini kontrol edin.");
-                    if (!HasServerUsage(certificate))
-                        throw new AiServiceException("Seçilen sertifika TLS sunucu kullanımı için uygun değil. Sunucunun .cer/.crt sertifikasını seçin.");
-                    return new ServerCertificateTrust(certificate);
-                }
-            }
-            catch (CryptographicException ex) { throw new AiServiceException("Sunucu sertifikası geçersiz. Tek bir DER veya PEM .cer/.crt sertifikası seçin.", ex); }
-        }
-
-        private static bool HasServerUsage(X509Certificate2 certificate)
-        {
-            foreach (var extension in certificate.Extensions)
-            {
-                if (extension.Oid.Value == "2.5.29.37")
-                {
-                    var usages = new X509EnhancedKeyUsageExtension(extension, extension.Critical);
-                    bool serverAllowed = false;
-                    foreach (Oid usage in usages.EnhancedKeyUsages)
-                        serverAllowed |= usage.Value == "1.3.6.1.5.5.7.3.1" || usage.Value == "2.5.29.37.0";
-                    if (!serverAllowed) return false;
-                }
-                if (extension.Oid.Value == "2.5.29.15")
-                {
-                    var usage = new X509KeyUsageExtension(extension, extension.Critical);
-                    var usable = X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.KeyAgreement;
-                    if ((usage.KeyUsages & usable) == 0) return false;
-                }
-            }
-            return true; // Missing usage extensions mean unconstrained usage, not client-only usage.
-        }
-
-        public bool Validate(X509Certificate2 certificate, X509Chain chain, SslPolicyErrors errors)
-        {
-            if ((errors & ~SslPolicyErrors.RemoteCertificateChainErrors) != SslPolicyErrors.None)
-                return false; // Never bypass hostname mismatch, missing certificate or unknown errors.
-            DateTime now = DateTime.UtcNow;
-            if (now < validFromUtc || now > validUntilUtc || certificate == null || chain == null) return false;
-            try
-            {
-                if (!Matches(certificate) || chain.ChainElements.Count == 0 || !Matches(chain.ChainElements[0].Certificate))
-                    return false;
-                bool hasTrustError = false;
-                foreach (var status in chain.ChainStatus)
-                {
-                    if (!IsPermittedStatus(status.Status)) return false;
-                    hasTrustError |= status.Status != X509ChainStatusFlags.NoError;
-                }
-                // A chain failure with no known trust-only status must fail closed.
-                return errors == SslPolicyErrors.None || hasTrustError;
+                if (certificate == null || !IsCurrent(certificate) || !HasServerUsage(certificate)) return false;
+                if (pinnedServer != null && !Equal(pinnedServer, certificate.RawData)) return false;
+                return IsAnchoredPath(certificate, chain, legacySingleLeaf);
             }
             catch (CryptographicException) { return false; }
             catch (InvalidOperationException) { return false; }
         }
 
-        public static bool IsPermittedStatus(X509ChainStatusFlags status)
+        private bool IsAnchoredPath(X509Certificate2 certificate, X509Chain chain, bool allowPartial)
         {
-            const X509ChainStatusFlags trustOnly = X509ChainStatusFlags.UntrustedRoot | X509ChainStatusFlags.PartialChain;
-            return (status & ~trustOnly) == X509ChainStatusFlags.NoError;
-        }
-
-        private bool Matches(X509Certificate2 certificate)
-        {
-            byte[] actual = certificate.RawData;
-            if (actual.Length != expectedCertificate.Length) return false;
-            for (int index = 0; index < actual.Length; index++)
-                if (actual[index] != expectedCertificate[index]) return false;
+            if (chain == null || chain.ChainElements.Count == 0
+                || !Equal(certificate.RawData, chain.ChainElements[0].Certificate.RawData)) return false;
+            if (trustedRoot != null && !Equal(trustedRoot, chain.ChainElements[chain.ChainElements.Count - 1].Certificate.RawData))
+                return false; // Never fall back to an unrelated OS-trusted root.
+            foreach (var element in chain.ChainElements) if (!IsCurrent(element.Certificate)) return false;
+            foreach (var status in chain.ChainStatus) if (!IsPermittedStatus(status.Status, allowPartial)) return false;
             return true;
         }
 
-        private static AiServiceException InvalidCertificate()
+        public static bool IsPermittedStatus(X509ChainStatusFlags status, bool allowPartialChain = true)
         {
-            return new AiServiceException("En fazla 64 KiB boyutunda, yalnızca açık anahtar içeren tek bir sunucu sertifikası (.cer/.crt) seçin. PFX, özel anahtar ve sertifika paketleri desteklenmez.");
+            var allowed = X509ChainStatusFlags.UntrustedRoot;
+            if (allowPartialChain) allowed |= X509ChainStatusFlags.PartialChain;
+            return (status & ~allowed) == X509ChainStatusFlags.NoError;
+        }
+
+        private static bool IsAuthority(X509Certificate2 certificate)
+        {
+            foreach (var extension in certificate.Extensions)
+                if (extension.Oid.Value == "2.5.29.19")
+                    return new X509BasicConstraintsExtension(extension, extension.Critical).CertificateAuthority;
+            return false;
+        }
+        private static bool IsRoot(X509Certificate2 certificate)
+        {
+            return Equal(certificate.SubjectName.RawData, certificate.IssuerName.RawData);
+        }
+        private static bool HasAuthorityUsage(X509Certificate2 certificate)
+        {
+            if (!HasServerEku(certificate)) return false;
+            foreach (var extension in certificate.Extensions)
+                if (extension.Oid.Value == "2.5.29.15")
+                    return (new X509KeyUsageExtension(extension, extension.Critical).KeyUsages & X509KeyUsageFlags.KeyCertSign) != 0;
+            return true;
+        }
+        private static bool HasServerUsage(X509Certificate2 certificate)
+        {
+            if (!HasServerEku(certificate)) return false;
+            foreach (var extension in certificate.Extensions)
+                if (extension.Oid.Value == "2.5.29.15")
+                {
+                    var usage = new X509KeyUsageExtension(extension, extension.Critical).KeyUsages;
+                    return (usage & (X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment | X509KeyUsageFlags.KeyAgreement)) != 0;
+                }
+            return true;
+        }
+        private static bool HasServerEku(X509Certificate2 certificate)
+        {
+            foreach (var extension in certificate.Extensions)
+                if (extension.Oid.Value == "2.5.29.37")
+                    return new X509EnhancedKeyUsageExtension(extension, extension.Critical).EnhancedKeyUsages.Cast<Oid>()
+                        .Any(oid => oid.Value == "1.3.6.1.5.5.7.3.1" || oid.Value == "2.5.29.37.0");
+            return true;
+        }
+        private static bool IsCurrent(X509Certificate2 certificate)
+        {
+            DateTime now = DateTime.UtcNow;
+            return now >= certificate.NotBefore.ToUniversalTime() && now <= certificate.NotAfter.ToUniversalTime();
+        }
+        private static void RequireCurrent(X509Certificate2 certificate)
+        {
+            if (!IsCurrent(certificate)) throw new AiServiceException("Sertifikalardan biri henüz geçerli değil veya süresi dolmuş. Geçerli zinciri seçin ve Windows saatini kontrol edin.");
+        }
+        private static bool Equal(byte[] left, byte[] right)
+        {
+            return left.Length == right.Length && left.SequenceEqual(right);
+        }
+        private static AiServiceException InvalidChain()
+        {
+            return new AiServiceException("Geçerli, tek bir kökte sonlanan zincir seçin. CA modunda yalnızca CA sertifikaları; sunucu modunda tek bir sunucu ve ara/kök sertifikaları gerekir. Eksik veya ilgisiz zincirler kabul edilmez.");
         }
     }
 }
