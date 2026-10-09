@@ -27,6 +27,8 @@ namespace Ask.ai
                 }
             }
             catch (MailActionException ex) { ShowError(ex.Message); }
+            catch (AiServiceException ex) { ShowError(ex.Message); }
+            catch (AiResponseException ex) { ShowError(ex.Message); }
             catch (Exception)
             {
                 // Never surface COM details, provider response bodies or credentials.

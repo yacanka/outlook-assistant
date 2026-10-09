@@ -35,6 +35,29 @@ Outlook'ta Central/Legacy seçimini, model/token kaydetmeyi, yeniden açmayı,
 token silmeyi, hazırlık durumunu ve bekleyen akışın iptalini doğrulayın.
 Canlı denemede hassas içerik yerine uydurma bir e-posta kullanın.
 
+## Bağlantı hatalarını ayırma
+
+Arayüz artık servis hatalarında HTTP kodunu ve güvenli bir açıklamayı gösterir:
+401 token, 403 yetki, 407 proxy kimlik doğrulaması, 429 kullanım sınırı; 3xx ise
+izlenmeyen yönlendirme olarak bildirilir. 200 ile HTML dönmesi başarılı AI yanıtı
+sayılmaz; giriş veya proxy sayfası olabileceği belirtilir. Central'da belirtilen
+Content-Type `text/event-stream` olmalıdır; `application/json` gibi farklı türler
+streaming uyumsuzluğu olarak bildirilir. Header'ı eksik, geçerli SSE akışları önceki
+sürümlerle uyumlu biçimde kabul edilir.
+
+Windows `TrustFailure` hatası sertifika doğrulaması, `SecureChannelFailure` veya
+`AuthenticationException` TLS bağlantısı; isim çözümleme hataları DNS olarak
+gösterilir. Bunlar kesin alt nedeni belirleyen sertifika analizi değildir; Windows
+ve servis tarafında ilgili zincir/proxy/TLS ayarları ayrıca kontrol edilmelidir.
+Ham servis yanıtı, yönlendirme adresi, token veya iç exception mesajı ekrana/loga
+yazılmaz. İç exception tanı için korunur; sertifika doğrulaması ve TLS ayarları
+değiştirilmez.
+
+Curl ile yapılan GET isteğinde 200 alınması, uygulamanın token, model ve
+`stream: true` içeren POST çağrısının başarılı olacağını kanıtlamaz. Testler HTTP,
+yanıt türü ve bağlantı hatalarının güvenli sınıflandırmasını ağ kullanmadan kontrol
+eder; gerçek Windows TLS ortamını taklit etmez.
+
 ## Mail yetenekleri
 
 - **AI ile mail hazırla:** Ana Outlook penceresindeki AI Asistan grubunda bulunur.

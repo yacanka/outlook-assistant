@@ -17,6 +17,7 @@ class Program
         await LegacyTransportTests.Run();
         AppConfig.CentralApiUrl = "https://example.invalid/chat";
         AppConfig.CentralModels = new[] { "test-model" };
+        await ConnectionDiagnosticsTests.Run();
         var handler = new FakeHandler();
         var service = new CentralAiService(new HttpClient(handler));
         var chunks = new List<string>();

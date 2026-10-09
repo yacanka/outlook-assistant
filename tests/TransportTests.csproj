@@ -14,9 +14,11 @@
     <Compile Include="OfficeSimulation.cs" />
     <Compile Include="../OutlookMailTarget.cs" />
     <Compile Include="LegacyTransportTests.cs" />
+    <Compile Include="ConnectionDiagnosticsTests.cs" />
     <Compile Include="../LegacyAiService.cs" />
     <Compile Include="../MailGeneration.cs" />
     <Compile Include="../CentralAiService.cs" />
+    <Compile Include="../AiConnectionErrors.cs" />
     <Compile Include="../AppConfig.cs" />
   </ItemGroup>
 </Project>

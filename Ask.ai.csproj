@@ -204,6 +204,7 @@
     <Compile Include="AiInspectorRibbons.cs" />
     <Compile Include="LegacyAiService.cs" />
     <Compile Include="CentralAiService.cs" />
+    <Compile Include="AiConnectionErrors.cs" />
     <Compile Include="AiSettings.cs" />
     <Compile Include="AiSettingsForm.cs" />
     <Compile Include="ProgressForm.cs">

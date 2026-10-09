@@ -49,8 +49,7 @@ namespace Askai
                 {
                     using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false))
                     {
-                        if (!response.IsSuccessStatusCode)
-                            throw new HttpRequestException("Legacy AI isteği başarısız.");
+                        AiConnectionErrors.CheckResponse(response, "Legacy", requireEventStream: false);
                         string mediaType = response.Content.Headers.ContentType?.MediaType;
                         using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                         using (deadline.Token.Register(() => stream.Dispose()))
@@ -66,9 +65,9 @@ namespace Askai
                     cancellationToken.ThrowIfCancellationRequested();
                     throw new TimeoutException("Legacy AI isteği zaman aşımına uğradı.");
                 }
-                catch (HttpRequestException)
+                catch (HttpRequestException ex) when (!(ex is AiServiceException))
                 {
-                    throw new HttpRequestException("Legacy AI servisine erişilemedi veya istek reddedildi.");
+                    throw AiConnectionErrors.FromTransport("Legacy", ex);
                 }
             }
         }
@@ -229,6 +228,6 @@ namespace Askai
             return content.GetString();
         }
 
-        private static IOException InvalidStream() { return new IOException("Legacy AI yanıtı geçersiz veya tamamlanmadı."); }
+        private static IOException InvalidStream() { return new AiResponseException("Legacy"); }
     }
 }

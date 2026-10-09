@@ -54,8 +54,7 @@ namespace Askai
                 {
                     using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false))
                     {
-                        if (!response.IsSuccessStatusCode)
-                            throw new HttpRequestException("Central AI isteği başarısız (HTTP " + (int)response.StatusCode + ").");
+                        AiConnectionErrors.CheckResponse(response, "Central", requireEventStream: true);
                         using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                         using (deadline.Token.Register(() => stream.Dispose()))
                             return await ReadEventsAsync(stream, onChunk, deadline.Token).ConfigureAwait(false);
@@ -66,9 +65,9 @@ namespace Askai
                     cancellationToken.ThrowIfCancellationRequested();
                     throw new TimeoutException("Central AI isteği zaman aşımına uğradı.");
                 }
-                catch (HttpRequestException)
+                catch (HttpRequestException ex) when (!(ex is AiServiceException))
                 {
-                    throw new HttpRequestException("Central AI servisine erişilemedi veya istek reddedildi.");
+                    throw AiConnectionErrors.FromTransport("Central", ex);
                 }
             }
         }
@@ -136,6 +135,6 @@ namespace Askai
             catch (JsonException) { throw InvalidStream(); }
             catch (InvalidOperationException) { throw InvalidStream(); }
         }
-        private static IOException InvalidStream() { return new IOException("Central AI yanıt akışı geçersiz veya tamamlanmadı."); }
+        private static IOException InvalidStream() { return new AiResponseException("Central"); }
     }
 }
