@@ -6,13 +6,13 @@ namespace Askai
 {
     public sealed class AiSettingsForm : Form
     {
-        private readonly ComboBox provider = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300 };
-        private readonly ComboBox model = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300 };
-        private readonly TextBox token = new TextBox { UseSystemPasswordChar = true, Width = 300 };
+        private readonly ComboBox provider = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+        private readonly ComboBox model = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+        private readonly TextBox token = new TextBox { UseSystemPasswordChar = true, Dock = DockStyle.Fill };
         private readonly CheckBox tls12 = new CheckBox { Text = "TLS 1.2 uyumluluk modu", AutoSize = true };
         private readonly TextBox certificateInfo = new TextBox
         {
-            ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, Width = 300, Height = 84
+            ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Height = 84
         };
         private readonly Button selectCertificate = new Button { Text = "Sertifika seç…", AutoSize = true };
         private readonly Button clearCertificate = new Button { Text = "Temizle", AutoSize = true };
@@ -21,13 +21,16 @@ namespace Askai
         public AiSettingsForm()
         {
             Text = "AI Ayarları";
+            AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(540, 590);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MinimumSize = SizeFromClientSize(new Size(400, 300));
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 2, RowCount = 11, AutoScroll = true };
+            var layout = new Ask.ai.ResponsiveTableLayoutPanel { Padding = new Padding(16), ColumnCount = 2, RowCount = 11 };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
             for (int row = 0; row < layout.RowCount; row++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.Controls.Add(new Label { Text = "Servis", AutoSize = true }, 0, 0);
             layout.Controls.Add(provider, 1, 0);
@@ -42,11 +45,11 @@ namespace Askai
             layout.Controls.Add(new Label
             {
                 Text = "TLS bağlantı hatasında deneyin. Yalnızca AI bağlantısı TLS 1.2 kullanır; sertifika doğrulaması açık kalır. Kapalıyken mevcut TLS seçimi kullanılır.",
-                AutoSize = true, MaximumSize = new Size(300, 0)
+                AutoSize = true, Dock = DockStyle.Fill
             }, 1, 5);
-            layout.Controls.Add(new Label { Text = "Central sunucu sertifikası", AutoSize = true, MaximumSize = new Size(160, 0) }, 0, 6);
+            layout.Controls.Add(new Label { Text = "Central sunucu sertifikası", AutoSize = true, Dock = DockStyle.Fill }, 0, 6);
             layout.Controls.Add(certificateInfo, 1, 6);
-            var certificateButtons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+            var certificateButtons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill };
             certificateButtons.Controls.Add(selectCertificate);
             certificateButtons.Controls.Add(clearCertificate);
             layout.Controls.Add(certificateButtons, 1, 7);
@@ -55,9 +58,9 @@ namespace Askai
             layout.Controls.Add(new Label
             {
                 Text = "İsteğe bağlı .cer/.crt dosyası. Seçildiğinde yalnızca bu sunucu sertifikası kabul edilir; adres ve geçerlilik kontrolleri devam eder. Windows sertifika deposu değişmez.",
-                AutoSize = true, MaximumSize = new Size(300, 0)
+                AutoSize = true, Dock = DockStyle.Fill
             }, 1, 8);
-            layout.Controls.Add(new Label { Text = "Token bu Windows kullanıcısı için şifrelenir. Silmek için alanı temizleyip kaydedin.", AutoSize = true, MaximumSize = new Size(300, 0) }, 1, 9);
+            layout.Controls.Add(new Label { Text = "Token bu Windows kullanıcısı için şifrelenir. Silmek için alanı temizleyip kaydedin.", AutoSize = true, Dock = DockStyle.Fill }, 1, 9);
             var save = new Button { Text = "Kaydet", AutoSize = true };
             save.Click += SaveSettings;
             layout.Controls.Add(save, 1, 10);

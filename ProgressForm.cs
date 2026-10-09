@@ -27,20 +27,22 @@ namespace Ask.ai
             components = new Container();
             Text = "AI Mail Asistanı";
             Font = new Font("Segoe UI", 10f);
+            AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(560, 280);
-            MinimumSize = new Size(500, 300);
+            MinimumSize = SizeFromClientSize(new Size(400, 200));
             StartPosition = FormStartPosition.CenterScreen;
             MaximizeBox = false;
             MinimizeBox = false;
-            var layout = new TableLayoutPanel
+            var layout = new ResponsiveTableLayoutPanel
             {
                 Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 1, RowCount = 6
             };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.Controls.Add(new Label { Text = title, AutoSize = true, Dock = DockStyle.Fill, Font = new Font(Font, FontStyle.Bold) }, 0, 0);
@@ -54,7 +56,7 @@ namespace Ask.ai
                 Text = "Uygulama mail göndermez. Aktarımdan sonra metni Outlook’ta inceleyip düzenleyebilirsiniz.",
                 AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 8)
             }, 0, 4);
-            var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
+            var buttons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(apply);
             layout.Controls.Add(buttons, 0, 5);

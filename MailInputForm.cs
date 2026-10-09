@@ -19,15 +19,18 @@ namespace Ask.ai
         {
             Text = composing ? "AI ile mail hazırla" : replyAll ? "AI ile tümünü yanıtla" : "AI ile yanıtla";
             Font = new Font("Segoe UI", 10f);
+            AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(560, 370);
-            MinimumSize = new Size(500, 370);
+            MinimumSize = SizeFromClientSize(new Size(400, 240));
             StartPosition = FormStartPosition.CenterScreen;
             MinimizeBox = false;
             MaximizeBox = false;
             subject.Text = sourceSubject;
             subject.ReadOnly = !composing;
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 1, RowCount = 7 };
+            var layout = new ResponsiveTableLayoutPanel { Padding = new Padding(20), ColumnCount = 1, RowCount = 7 };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            instructions.MinimumSize = new Size(0, 100);
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -51,7 +54,7 @@ namespace Ask.ai
                     : "Boş bırakırsanız kaynak mailin bağlamına göre yanıt hazırlanır. Aktarım için ayrıca onayınız alınır.",
                 AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 8)
             }, 0, 5);
-            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.RightToLeft };
             var cancel = new Button { Text = "&Vazgeç", AutoSize = true, DialogResult = DialogResult.Cancel };
             var prepare = new Button { Text = "&Hazırla", AutoSize = true };
             buttons.Controls.Add(cancel);

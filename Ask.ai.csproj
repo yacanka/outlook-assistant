@@ -201,6 +201,7 @@
     <Compile Include="OutlookMailTarget.cs" />
     <Compile Include="MailActionRunner.cs" />
     <Compile Include="MailInputForm.cs" />
+    <Compile Include="ResponsiveTableLayoutPanel.cs" />
     <Compile Include="AiInspectorRibbons.cs" />
     <Compile Include="LegacyAiService.cs" />
     <Compile Include="CentralAiService.cs" />
