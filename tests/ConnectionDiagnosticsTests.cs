@@ -26,8 +26,24 @@ internal static class ConnectionDiagnosticsTests
 
                 handler.Status = HttpStatusCode.Unauthorized;
                 var error = await ReadFailure(send);
+                Check(error.Message.StartsWith(central ? "PLUS AI (HTTP 401)" : "TAB 3.2 (HTTP 401)"),
+                    "Diagnostics identify the service by its visible name without repeating AI");
                 Check(error.Message.Contains("HTTP 401") && error.Message.Contains("token"), "HTTP authentication cause must reach user");
                 Check(!error.Message.Contains(handler.Payload), "provider body is never a user diagnostic");
+
+                handler.Status = HttpStatusCode.MethodNotAllowed;
+                handler.AllowedMethods = new[] { "GET", "HEAD", "OPTIONS", "private-provider-data" };
+                error = await ReadFailure(send);
+                Check(error.Message.Contains("HTTP 405") && error.Message.Contains("POST")
+                    && error.Message.Contains("API"), "405 explains the rejected POST and endpoint check");
+                Check(error.Message.Contains("GET, HEAD, OPTIONS") && !error.Message.Contains("private-provider-data")
+                    && !error.Message.Contains(handler.Payload), "405 exposes only known allowed methods");
+                Check(handler.Method == HttpMethod.Post, "AI request remains POST; TLS/diagnostics cannot change the method");
+                if (central)
+                    Check(handler.Address == new Uri(AppConfig.CentralApiUrl), "Central sends to the exact configured endpoint");
+                handler.AllowedMethods = null;
+                error = await ReadFailure(send);
+                Check(error.Message.Contains("HTTP 405") && error.Message.Contains("POST"), "405 without Allow remains actionable");
 
                 handler.Status = HttpStatusCode.Redirect;
                 error = await ReadFailure(send);
@@ -50,6 +66,8 @@ internal static class ConnectionDiagnosticsTests
                 handler.Error = original;
                 error = await ReadFailure(send);
                 Check(error.Message.Contains("sertifika") && ReferenceEquals(error.InnerException, original), "certificate cause preserved without leaking details");
+                Check(error.Message.StartsWith(central ? "PLUS AI:" : "TAB 3.2:"),
+                    "Transport failures use the same visible service names as HTTP diagnostics");
                 Check(!error.Message.Contains("private"), "raw exception text stays private");
 
                 handler.Error = new HttpRequestException("Synthetic transport detail", new AuthenticationException("Handshake failed"));
@@ -98,17 +116,24 @@ internal static class ConnectionDiagnosticsTests
         public string Payload = "<html>Synthetic private login page</html>";
         public Exception Error;
         public string CertificateFailure;
+        public string[] AllowedMethods;
+        public HttpMethod Method;
+        public Uri Address;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
         {
             cancellation.ThrowIfCancellationRequested();
+            Method = request.Method;
+            Address = request.RequestUri;
 #pragma warning disable CS0618
             if (CertificateFailure != null) request.Properties[AiConnectionErrors.CertificateFailureKey] = CertificateFailure;
 #pragma warning restore CS0618
             if (Error != null) throw Error;
-            return Task.FromResult(new HttpResponseMessage(Status)
+            var response = new HttpResponseMessage(Status)
             {
                 Content = new StringContent(Payload, Encoding.UTF8, MediaType)
-            });
+            };
+            if (AllowedMethods != null) response.Content.Headers.TryAddWithoutValidation("Allow", AllowedMethods);
+            return Task.FromResult(response);
         }
     }
 }

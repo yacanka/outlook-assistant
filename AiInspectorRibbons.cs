@@ -27,33 +27,43 @@ namespace Ask.ai
             tab.ControlId.OfficeId = composing ? "TabNewMailMessage" : "TabReadMessage";
             var group = Factory.CreateRibbonGroup();
             group.Name = composing ? "grpAiCompose" : "grpAiRead";
-            group.Label = "AI Asistan";
+            group.Label = AiBrand.Name;
             tab.Groups.Add(group);
             Tabs.Add(tab);
             if (composing)
-                AddCapability(group, "btnAiImprove", "Seçili metni iyileştir", "Spelling", MailCapability.Improve,
+                AddCapability(group, "btnAiImprove", "Metni İyileştir", "Spelling", MailCapability.Improve,
                     "Taslakta seçtiğiniz metni bağlamını koruyarak iyileştirir. Onayınızla yalnızca seçilen alanı değiştirir.");
             else
             {
-                AddCapability(group, "btnAiReadReply", "AI ile yanıtla", "Reply", MailCapability.Reply,
+                AddCapability(group, "btnAiReadReply", "Yanıtla", "Reply", MailCapability.Reply,
                     "Bu mail için yanıt hazırlar. Onayınızla Outlook taslağı açılır; mail gönderilmez.");
-                AddCapability(group, "btnAiReadReplyAll", "AI ile tümünü yanıtla", "ReplyAll", MailCapability.ReplyAll,
-                    "Bu mail için tümünü yanıtla taslağı hazırlar. Onayınız olmadan aktarım yapılmaz.");
+                AddCapability(group, "btnAiReadReplyAll", "Tümünü Yanıtla", "ReplyAll", MailCapability.ReplyAll,
+                    "Bu mail için tümünü yanıtla taslağı hazırlar. Onayınız olmadan aktarım yapılmaz.", large: false);
             }
             var settings = Factory.CreateRibbonButton();
             settings.Name = composing ? "btnComposeAiSettings" : "btnReadAiSettings";
-            settings.Label = "AI Ayarları";
+            settings.Label = "Ayarlar";
+            settings.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
+            settings.Image = AssistantIcon.RibbonImage;
+            settings.ShowImage = true;
+            settings.ScreenTip = "AI Asistan ayarları";
+            settings.SuperTip = "Servis, model, token ve bağlantı ayarlarını düzenleyin.";
             settings.Click += (sender, args) => { using (var dialog = new AiSettingsForm()) dialog.ShowDialog(); };
-            group.Items.Add(settings);
+            var preferences = Factory.CreateRibbonGroup();
+            preferences.Name = composing ? "grpComposeAiPreferences" : "grpReadAiPreferences";
+            preferences.Label = "Tercihler";
+            preferences.Items.Add(settings);
+            tab.Groups.Add(preferences);
         }
 
         private void AddCapability(RibbonGroup group, string name, string label, string image,
-            MailCapability capability, string description)
+            MailCapability capability, string description, bool large = true)
         {
             var button = Factory.CreateRibbonButton();
             button.Name = name;
             button.Label = label;
-            button.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
+            button.ControlSize = large ? Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge
+                : Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
             button.OfficeImageId = image;
             button.ShowImage = true;
             button.ScreenTip = label;

@@ -5,19 +5,19 @@ adresini, `CentralModels` dizisine sağlayıcının model kimliklerini ekleyin.
 Bu alanlar bilerek boş bırakılmıştır. Liste sırası açılır liste sırasıdır.
 URL credential, query veya fragment içeremez. Token'ı kaynak koda koymayın.
 
-Outlook şeridindeki **AI Ayarları** üzerinden Central/Legacy, Central model
-ve Central token ayarlanır. İlk kurulumda Central seçilidir. Liste doluysa
+Outlook şeridindeki **Ayarlar** üzerinden PLUS AI/TAB 3.2, PLUS AI model
+ve PLUS AI token ayarlanır. İlk kurulumda PLUS AI seçilidir. Liste doluysa
 ayarlar penceresi ilk modeli önerir; Kaydet ile seçimi kalıcılaştırın.
 Token alanını temizleyip Kaydet'e basmak kayıtlı token'ı siler. İptal/çarpı
-kaydetmez. Eksik Central yapılandırması çağrıdan önce anlaşılır hata verir.
+kaydetmez. Eksik PLUS AI yapılandırması çağrıdan önce anlaşılır hata verir.
 
 Ayarlar `%LOCALAPPDATA%\Askai\settings.xml` içinde tutulur. Token Windows
 DPAPI CurrentUser ile şifrelenir; başka bir Windows kullanıcısına taşınamaz.
 Model ve sağlayıcı gizli değildir. Okunamayan kayıt için ayarlar penceresi
-uyarı verip yeniden kaydetmeye izin verir. Central token Legacy'ye gönderilmez.
-Legacy mevcut `ApiUrl`, `ApiKey` ve istek formatını kullanır.
+uyarı verip yeniden kaydetmeye izin verir. PLUS AI token TAB 3.2'ye gönderilmez.
+TAB 3.2 mevcut `ApiUrl`, `ApiKey` ve istek formatını kullanır.
 
-Central `model`, `messages`, `stream: true` gönderir ve OpenAI uyumlu SSE
+PLUS AI `model`, `messages`, `stream: true` gönderir ve OpenAI uyumlu SSE
 `choices[].delta.content` parçalarını bellekte biriktirir; popup metni parçalar geldikçe salt okunur önizlemede gösterir. Servis SSE ve
 `[DONE]` bitiş işaretini desteklemelidir; AW Center'ın non-streaming kullanımı
 tek başına bu desteği kanıtlamaz. Otomatik retry/fallback/redirect yapılmaz.
@@ -26,12 +26,12 @@ Akış hatası veya iptalde kısmi içerikten Outlook yanıtı oluşturulmaz.
 
 ## Doğrulama
 
-`dotnet run --project tests/TransportTests.csproj` ağ erişimi yapmadan Central
+`dotnet run --project tests/TransportTests.csproj` ağ erişimi yapmadan PLUS AI
 transport sözleşmesini kontrol eder (.NET 10 SDK). Üretim hedefi .NET Framework
 4.7.2/VSTO olarak korunmuştur.
 
 Windows'ta Visual Studio Office geliştirme araçlarıyla çözümü derleyin.
-Outlook'ta Central/Legacy seçimini, model/token kaydetmeyi, yeniden açmayı,
+Outlook'ta PLUS AI/TAB 3.2 seçimini, model/token kaydetmeyi, yeniden açmayı,
 token silmeyi, hazırlık durumunu ve bekleyen akışın iptalini doğrulayın.
 Canlı denemede hassas içerik yerine uydurma bir e-posta kullanın.
 
@@ -40,7 +40,7 @@ Canlı denemede hassas içerik yerine uydurma bir e-posta kullanın.
 Arayüz artık servis hatalarında HTTP kodunu ve güvenli bir açıklamayı gösterir:
 401 token, 403 yetki, 407 proxy kimlik doğrulaması, 429 kullanım sınırı; 3xx ise
 izlenmeyen yönlendirme olarak bildirilir. 200 ile HTML dönmesi başarılı AI yanıtı
-sayılmaz; giriş veya proxy sayfası olabileceği belirtilir. Central'da belirtilen
+sayılmaz; giriş veya proxy sayfası olabileceği belirtilir. PLUS AI'da belirtilen
 Content-Type `text/event-stream` olmalıdır; `application/json` gibi farklı türler
 streaming uyumsuzluğu olarak bildirilir. Header'ı eksik, geçerli SSE akışları önceki
 sürümlerle uyumlu biçimde kabul edilir.
@@ -59,17 +59,45 @@ Curl ile yapılan GET isteğinde 200 alınması, uygulamanın token, model ve
 yanıt türü ve bağlantı hatalarının güvenli sınıflandırmasını ağ kullanmadan kontrol
 eder; gerçek Windows TLS ortamını taklit etmez.
 
+### TLS 1.2 açıkken HTTP 405 alınması
+
+TLS 1.2 açıkken HTTP 405 yanıtı alınması, bu denemenin HTTP katmanına kadar
+ilerlediğini gösterir. Yanıt API sunucusundan, gateway'den veya proxy'den gelebilir;
+gerçek model servisine ulaşıldığını tek başına kanıtlamaz. TLS 1.2'yi açık tutup
+POST hedefini inceleyin. 405 tanısı tam API endpoint'ini kontrol etmeyi önerir ve
+varsa `Allow` başlığındaki yalnızca bilinen HTTP yöntemlerini gösterir. Ham yanıt,
+URL veya bilinmeyen header değerleri gösterilmez.
+
+Outlook, `AppConfig.CentralApiUrl` adresine doğrudan POST yapar; otomatik olarak
+`/chat/completions` eklemez veya yönlendirme izlemez. AW Center'ın çalışan
+sağlayıcı ayarındaki tam URL (host, port, path ve sondaki slash dahil) ile bu
+adresi karşılaştırın. Web ana sayfası, model listeleme yolu veya AW Center'ın kendi
+frontend adresi sağlayıcının chat-completions endpoint'i yerine geçmez.
+
+Yerel AW Center `integrations.ai` istemcisi de POST, Bearer ve redirect kapalı
+kullanır; model isteği `stream: false`, `Accept: application/json` şeklindedir.
+Python `requests.post(..., stream=True)` burada yalnızca HTTP gövdesinin parça
+parça okunmasını seçer; model token streaming'i açmaz. Outlook ise `stream: true`
+ve `Accept: text/event-stream` kullanır. POST/endpoint sorunu düzeldikten sonra
+sağlayıcının SSE desteğini ayrıca doğrulayın; 405 tek başına streaming desteği
+hakkında kesin sonuç vermez.
+
+TLS 1.2 kapalıykenki TLS hatası ayrı incelenmelidir. .NET Framework/Outlook
+host'unun ve Windows'un varsayılan protokol seçimi, Python/OpenSSL ile aynı
+olmayabilir. TLS 1.2 açıkken HTTP yanıtı alınabiliyorsa, bu seçenekle ilerleyin;
+sertifika doğrulamasını veya host'un genel TLS ayarını değiştirmek 405'i çözmez.
+
 ### PowerShell gerektirmeyen TLS uyumluluk denemesi
 
-**AI Ayarları → TLS 1.2 uyumluluk modu → Kaydet** ile sonraki AI isteğinde TLS 1.2
+**Ayarlar → Bağlantı ve sertifika → TLS 1.2 uyumluluk modu → Kaydet** ile sonraki AI isteğinde TLS 1.2
 denenebilir. Varsayılan kapalıdır; eski ayar kayıtlarında alan yoksa kapalı kabul
-edilir. Central ve Legacy HTTPS bağlantılarına uygulanır. Token, model ve istek
+edilir. PLUS AI ve TAB 3.2 HTTPS bağlantılarına uygulanır. Token, model ve istek
 formatı değişmez. Yeniden başlatma gerekmez; mod değişince farklı bağlantı havuzu
 kullanılır. Devam eden istek başlangıçta seçilen modu kullanır.
 
 Bu seçenek yalnızca AI HTTP istemcisinde `HttpClientHandler.SslProtocols = Tls12`
 ayarlar. Outlook'un `ServicePointManager` ayarı, Windows/registry ayarları, proxy
-kullanımı ve sertifika doğrulaması değiştirilmez. Central ve Legacy bağlantı ve
+kullanımı ve sertifika doğrulaması değiştirilmez. PLUS AI ve TAB 3.2 bağlantı ve
 cookie havuzları ayrı tutulur. Yeni bağımlılık veya otomatik retry eklenmez.
 
 Açıkken TLS 1.3 denenmez; servis TLS 1.2 desteklemelidir. Kapalıyken önceki TLS
@@ -85,9 +113,9 @@ açmayı, eski ayar kaydını yüklemeyi, modu kapatmayı ve gerçek API çağr�
 doğrulayın. DPAPI ayar kaydı, VSTO arayüzü ve gerçek TLS el sıkışması bu macOS
 test ortamında doğrulanmaz.
 
-### Manuel Central sertifika güveni
+### Manuel PLUS AI sertifika güveni
 
-**AI Ayarları → Central sertifika modu → Sertifika seç… → Kaydet** üzerinden üç
+**Ayarlar → Bağlantı ve sertifika → Sertifika modu → Sertifika seç… → Kaydet** üzerinden üç
 ayrı mod kullanılabilir:
 
 - **CA zincirine güven:** Yalnızca kök ve isteğe bağlı ara CA sertifikaları seçilir.
@@ -111,8 +139,8 @@ ayrı mod kullanılabilir:
   değişmez. Windows/OpenSSL zincir oluşturma farklılıkları nedeniyle Python ile
   her ortamda birebir aynı sonucu vereceği garanti edilmez.
 
-Python'da çalışan kök + ara + sunucu paketinizi kullanmak için **AI Ayarları →
-Central sertifika modu → Sertifika paketi (CRL/OCSP kapalı) → Sertifika seç… →
+Python'da çalışan kök + ara + sunucu paketinizi kullanmak için **Ayarlar → Bağlantı ve sertifika →
+Sertifika modu → Sertifika paketi (CRL/OCSP kapalı) → Sertifika seç… →
 Kaydet** adımlarını izleyin. PEM içerikli `.cer/.crt` dosyasını seçin. Paket bu
 moda özel saklanır; diğer modlarda daha önce yüklenen dosyalar otomatik taşınmaz.
 
@@ -140,7 +168,7 @@ sayısını, kök adını ve SHA-256 parmak izini gösterir. Kaydet açık serti
 saklar; dosya yolu veya özel anahtar kaydedilmez. Token'ın DPAPI şifrelemesi
 korunur. Dosyayı sonradan değiştirmek kaydı değiştirmez; yeni dosyalar yeniden
 seçilmelidir. İptal/pencereyi kapatma değişiklikleri kaydetmez. Eski ayar kayıtları
-sunucu modunda açılır. Legacy bu sertifika ayarlarını kullanmaz.
+sunucu modunda açılır. TAB 3.2 bu sertifika ayarlarını kullanmaz.
 
 Seçim sırasında zincirin yapısı ve imzaları iptal servisine ihtiyaç olmadan
 kontrol edilir. Native zincir oluşturucusu AIA sorgusu yapabilir; erişilemeyen
@@ -189,16 +217,16 @@ ayrıca doğrulanmalıdır.
 
 ## Mail yetenekleri
 
-- **AI ile mail hazırla:** Ana Outlook penceresindeki AI Asistan grubunda bulunur.
+- **Mail Hazırla:** Ana Outlook penceresindeki AI Asistan grubunda bulunur.
   Konu zorunlu, açıklama/talimat isteğe bağlıdır. Onaydan sonra yeni bir mail
   penceresi açılır. Konu kullanıcı girdisinden alınır; alıcıları kullanıcı belirler.
-- **Seçili metni iyileştir:** Yeni mail veya yanıt taslağını ayrı bir pencerede
+- **Metni İyileştir:** Yeni mail veya yanıt taslağını ayrı bir pencerede
   açın, metni seçin ve AI Asistan grubundaki düğmeyi kullanın. Yalnızca seçilen
   metin yeniden yazılır. Seçimin dışındaki içerik, imza, alıntılar ve ekler korunur.
   Baştaki/sondaki paragraf sınırları değiştirilmez. Seçilen alanın kelime bazındaki
   zengin biçimlendirmesi birebir korunmayabilir. Tablo, görsel, alan veya korumalı
   içerik içeren seçimler desteklenmez. Satır içi yanıt için önce ayrı pencereye açın.
-- **AI ile yanıtla / tümünü yanıtla:** Ana pencerede tek bir mail seçerek veya
+- **Yanıtla / Tümünü Yanıtla:** Ana pencerede tek bir mail seçerek veya
   okuma penceresinde kullanılır. Yanıtın amacını isteğe bağlı olarak belirtin.
   Onaydan sonra Outlook'un kendi Reply/ReplyAll taslağı açılır; alıcılar ve yazışma
   ilişkisi Outlook tarafından belirlenir. Kaynak mail değiştirilmez.
@@ -222,9 +250,9 @@ Konu en fazla 255, talimat 4.000, kaynak metin 32.000 karakter olabilir. Uzun ka
 sessizce kesilmez; kısaltılması istenir. Kaynak ve talimat seçili AI sağlayıcısına
 gönderilir; uygulama bunları dosyaya veya loga yazmaz.
 
-### Legacy tamamlanma sözleşmesi
+### TAB 3.2 tamamlanma sözleşmesi
 
-Legacy istek alanları korunur. Önceki sürümle uyumlu olarak ardışık `data:`
+TAB 3.2 istek alanları korunur. Önceki sürümle uyumlu olarak ardışık `data:`
 satırları (boş SSE ayıracı olmasa da), NDJSON, tek/çok satırlı JSON belgeleri ve
 ham metin desteklenir. `application/json` başlığıyla gelen satır akışları da
 parçalar geldikçe işlenir. `[DONE]` veya `done: true` varsa tamamlanma için
@@ -236,13 +264,13 @@ aktarımdan önce önizlemeyi kontrol edin.
 Açık `done: false` ile biten yanıt, eksik/bozuk JSON, geçersiz UTF-8, hata olayı,
 HTTP/okuma hatası, iptal ve `stop` dışındaki başarısız bitiş nedenleri reddedilir.
 `response`, `text`, `content`, `output`, `message.content` ve OpenAI `choices`
-alanları desteklenir. Central'ın SSE ve `[DONE]` sözleşmesi değişmez.
+alanları desteklenir. PLUS AI servisinin SSE ve `[DONE]` sözleşmesi değişmez.
 Her iki sağlayıcıda istek/yanıt sınırı 1 MiB; toplam süre `TimeoutMinutes` kadardır.
 
 ### Yeni doğrulama kapsamı
 
 `dotnet run --project tests/TransportTests.csproj` artık mail onay durumlarını,
-paragraf sınırlarını ve Legacy akışlarını da kontrol eder. Ayrıca gerçek aktarım
+paragraf sınırlarını ve TAB 3.2 akışlarını da kontrol eder. Ayrıca gerçek aktarım
 sınıfını test nesneleriyle çalıştırarak hedef/aralık seçimini, değişmiş hedefin
 reddedilmesini ve yeni taslak hata temizliğini sınar. Ağ veya Outlook gerektirmez.
 Bu simülasyonlar gerçek COM ömrünü, Word biçimlendirmesini, Outlook otomatik
@@ -253,7 +281,7 @@ Windows üzerinde Visual Studio'nun **Office/SharePoint development** araçları
 `Askai.sln` çözümünü derleyip klasik Outlook'ta şu kontrolleri yapın:
 
 1. Ana pencere, mail okuma ve taslak pencerelerinde uygun yeteneklerin görünmesi;
-   AI Ayarları'nın ve Central/Legacy seçiminin çalışması.
+   Ayarlar penceresinin ve PLUS AI/TAB 3.2 seçiminin çalışması.
 2. Konudan hazırlamada onaydan önce taslak oluşmaması; onaydan sonra boş alıcılar,
    doğru konu, tek AI gövdesi ve mevcut imza ile yeni mail açılması.
 3. Yanıtla/tümünü yanıtla için doğru kaynak, alıcılar, imza, yazışma ilişkisi ve
@@ -270,3 +298,29 @@ Windows üzerinde Visual Studio'nun **Office/SharePoint development** araçları
    kullanıcıya ait taslakların açık ve değişmeden kalması.
 8. Klavye ile düğmelere erişim, yüksek DPI'da okunabilirlik, popup'ta metin
    önizlemesinin üretim sırasında güncellenmesi ve normal Outlook gönderiminin kullanıcı kontrolünde olması.
+
+### Görünen adlar ve eklenti kimliği
+
+Eklenti Outlook ve kurulum ekranlarında **AI Asistan** adıyla görünür. Servis
+seçenekleri **PLUS AI** ve **TAB 3.2** olarak gösterilir; hata mesajları da bu
+adları kullanır. Ana şeritte **Mail Hazırla** büyük, **Yanıtla** ve **Tümünü
+Yanıtla** küçük düğmelerdir. Okuma penceresinde **Yanıtla**, düzenleme
+penceresinde **Metni İyileştir** öne çıkar. **Ayarlar**, **Tercihler** grubunda
+bulunur.
+
+Ayarlar penceresinin **Servis** sekmesinde servis, PLUS AI modeli ve token;
+**Bağlantı ve sertifika** sekmesinde TLS ve PLUS AI sertifika ayarları bulunur.
+**Kaydet** ve **Vazgeç** düğmeleri kaydırılan alanın dışında kalır. TAB 3.2
+seçildiğinde PLUS AI alanları ve token silme düğmesi devre dışı kalır; mevcut
+değerler korunur. Enter kaydeder, Escape değişiklikleri kaydetmeden kapatır.
+
+Mevcut kurulum ve ayarların uyumluluğu için assembly/namespace, proje dosya
+adı, sağlayıcı enum değerleri (`Central`/`Legacy`), `AppConfig` alanları ve
+`%LOCALAPPDATA%\Askai\settings.xml` içindeki anahtarlar değiştirilmez. Bunlar
+görünen marka adları değildir; önceki kurulumların token ve sertifikaları
+yeniden kullanılabilir.
+
+`Assets/Assistant.svg` ölçeklenebilir ikon kaynağıdır. Aynı ikon PNG ve
+16–256 piksel boyutlarını içeren ICO olarak sağlanır; eklenti assembly'sine
+gömülür, Ayarlar düğmesinde ve pencerelerin başlık çubuğunda kullanılır.
+Yeni bir çalışma zamanı bağımlılığı eklenmemiştir.

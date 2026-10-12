@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -19,7 +20,7 @@ namespace Askai
     internal sealed class AiResponseException : IOException
     {
         public AiResponseException(string provider) : base(provider +
-            " AI yanıt akışı geçersiz veya tamamlanmadı. Servisin streaming desteğini ve akışın tamamlandığını kontrol edin.") { }
+            " yanıt akışı geçersiz veya tamamlanmadı. Servisin streaming desteğini ve akışın tamamlandığını kontrol edin.") { }
     }
 
     internal static class AiConnectionErrors
@@ -29,9 +30,9 @@ namespace Askai
         public static void CheckResponse(HttpResponseMessage response, string provider, bool requireEventStream)
         {
             int status = (int)response.StatusCode;
-            string prefix = provider + " AI (HTTP " + status + "): ";
+            string prefix = provider + " (HTTP " + status + "): ";
             if (!response.IsSuccessStatusCode)
-                throw new AiServiceException(prefix + HttpAdvice(status));
+                throw new AiServiceException(prefix + HttpAdvice(response));
 
             string mediaType = response.Content.Headers.ContentType?.MediaType;
             if (string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase)
@@ -50,12 +51,14 @@ namespace Askai
             }
         }
 
-        private static string HttpAdvice(int status)
+        private static string HttpAdvice(HttpResponseMessage response)
         {
+            int status = (int)response.StatusCode;
             switch (status)
             {
-                case 401: return "Kimlik doğrulaması reddedildi. AI Ayarları'ndaki token'ın geçerliliğini kontrol edin.";
+                case 401: return "Kimlik doğrulaması reddedildi. AI Asistan ayarlarındaki token'ın geçerliliğini kontrol edin.";
                 case 403: return "Erişim reddedildi. Hesabın servis ve model yetkilerini kontrol edin.";
+                case 405: return "Hedef adres POST yöntemini kabul etmiyor. Tam AI API endpoint'ini AW Center'daki çalışan adresle birebir karşılaştırın; web ana sayfası veya model listeleme adresini kullanmayın. API gateway/proxy yöntem kurallarını da kontrol edin." + AllowedMethodsAdvice(response);
                 case 407: return "Proxy kimlik doğrulaması gerekiyor. Kurumsal proxy ayarlarını BT ile kontrol edin.";
                 case 429: return "Servis kullanım sınırına ulaşıldı. Daha sonra yeniden deneyin.";
                 default:
@@ -65,12 +68,21 @@ namespace Askai
             }
         }
 
+        private static string AllowedMethodsAdvice(HttpResponseMessage response)
+        {
+            if (response.Content == null) return "";
+            // Provider headers are untrusted: expose only a bounded set of standard method names.
+            var methods = new[] { "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT" }
+                .Where(method => response.Content.Headers.Allow.Contains(method)).ToArray();
+            return methods.Length == 0 ? "" : " Sunucunun bildirdiği izinli yöntemler (Allow): " + string.Join(", ", methods) + ".";
+        }
+
         public static AiServiceException FromTransport(string provider, HttpRequestException error, HttpRequestMessage request = null)
         {
             object failure;
 #pragma warning disable CS0618 // .NET Framework request-scoped diagnostics.
             if (request != null && request.Properties.TryGetValue(CertificateFailureKey, out failure) && failure is string)
-                return new AiServiceException(provider + " AI: " + (string)failure + NativeErrorDetail(error), error);
+                return new AiServiceException(provider + ": " + (string)failure + NativeErrorDetail(error), error);
 #pragma warning restore CS0618
             bool tls = false;
             bool dns = false;
@@ -81,7 +93,7 @@ namespace Askai
                 {
                     if (web.Status == WebExceptionStatus.TrustFailure)
                         return new AiServiceException(provider +
-                            " AI: Windows sunucu sertifikasını doğrulayamadı. Sertifika zincirini, geçerlilik süresini ve adres eşleşmesini BT ile kontrol edin." + NativeErrorDetail(error), error);
+                            ": Windows sunucu sertifikasını doğrulayamadı. Sertifika zincirini, geçerlilik süresini ve adres eşleşmesini BT ile kontrol edin." + NativeErrorDetail(error), error);
                     tls |= web.Status == WebExceptionStatus.SecureChannelFailure;
                     dns |= web.Status == WebExceptionStatus.NameResolutionFailure
                         || web.Status == WebExceptionStatus.ProxyNameResolutionFailure;
@@ -94,12 +106,12 @@ namespace Askai
             }
             if (tls)
                 return new AiServiceException(provider +
-                    " AI: TLS güvenli bağlantısı kurulamadı. Windows ve sunucunun TLS ayarlarını, sertifika zincirini ve kurumsal proxy'yi kontrol edin." + NativeErrorDetail(error), error);
+                    ": TLS güvenli bağlantısı kurulamadı. Windows ve sunucunun TLS ayarlarını, sertifika zincirini ve kurumsal proxy'yi kontrol edin." + NativeErrorDetail(error), error);
             if (dns)
                 return new AiServiceException(provider +
-                    " AI: DNS çözümlemesi başarısız. Servis/proxy adresini ve VPN bağlantısını kontrol edin.", error);
+                    ": DNS çözümlemesi başarısız. Servis/proxy adresini ve VPN bağlantısını kontrol edin.", error);
             return new AiServiceException(provider +
-                " AI: Servise bağlantı kurulamadı. Servisin çalıştığını, ağ/VPN, proxy ve güvenlik duvarı erişimini kontrol edin.", error);
+                ": Servise bağlantı kurulamadı. Servisin çalıştığını, ağ/VPN, proxy ve güvenlik duvarı erişimini kontrol edin.", error);
         }
 
         private static string NativeErrorDetail(Exception error)

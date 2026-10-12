@@ -26,5 +26,6 @@
     <Compile Include="../ServerCertificateTrust.cs" />
     <Compile Include="../CertificateMaterial.cs" />
     <Compile Include="../AppConfig.cs" />
+    <Compile Include="../AiBrand.cs" />
   </ItemGroup>
 </Project>

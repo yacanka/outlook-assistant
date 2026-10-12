@@ -49,7 +49,7 @@ namespace Askai
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException
                 || ex is CryptographicException || ex is FormatException || ex is System.Xml.XmlException)
             {
-                throw new InvalidOperationException("AI ayarları okunamadı. AI Ayarları penceresinden yeniden kaydedin.");
+                throw new InvalidOperationException("AI ayarları okunamadı. AI Asistan ayarlarından yeniden kaydedin.");
             }
         }
 

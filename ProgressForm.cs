@@ -34,7 +34,8 @@ namespace Ask.ai
         {
             this.cancellation = cancellation;
             components = new Container();
-            Text = "AI Mail Asistanı";
+            Text = Askai.AiBrand.Name;
+            Icon = AssistantIcon.WindowIcon;
             Font = new Font("Segoe UI", 10f);
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;

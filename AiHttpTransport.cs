@@ -25,7 +25,7 @@ namespace Askai
             if (!string.IsNullOrEmpty(serverCertificateBase64))
             {
                 if (forLegacy)
-                    throw new AiServiceException("Manuel sunucu sertifikası yalnızca Central HTTPS bağlantısında kullanılabilir.");
+                    throw new AiServiceException("Manuel sunucu sertifikası yalnızca PLUS AI HTTPS bağlantısında kullanılabilir.");
                 // Revalidate lifetime on every request, including reuse of an existing TLS connection.
                 var trust = ServerCertificateTrust.FromBase64(serverCertificateBase64, certificateTrustMode);
                 return GetCertificateClient(useTls12, trust);

@@ -18,6 +18,8 @@ namespace Askai
         };
         private readonly Button selectCertificate = new Button { Text = "Sertifika seç…", AutoSize = true };
         private readonly Button clearCertificate = new Button { Text = "Temizle", AutoSize = true };
+        private readonly Button clearToken = new Button { Name = "ClearToken", Text = "Token’ı sil", AutoSize = true };
+        private readonly Label providerHelp = new Label { AutoSize = true, Dock = DockStyle.Fill };
         private string centralServerCertificate = "";
         private string centralCaCertificates = "";
         private string centralBundleCertificates = "";
@@ -30,57 +32,76 @@ namespace Askai
 
         public AiSettingsForm()
         {
-            Text = "AI Ayarları";
+            Text = AiBrand.Name + " — Ayarlar";
+            Icon = Ask.ai.AssistantIcon.WindowIcon;
+            Font = new Font("Segoe UI", 10f);
+            BackColor = SystemColors.Window;
+            ForeColor = SystemColors.WindowText;
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(560, 640);
+            ClientSize = new Size(600, 620);
             MinimumSize = SizeFromClientSize(new Size(400, 300));
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            var layout = new Ask.ai.ResponsiveTableLayoutPanel { Padding = new Padding(16), ColumnCount = 2, RowCount = 12 };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
-            for (int row = 0; row < layout.RowCount; row++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.Controls.Add(new Label { Text = "Servis", AutoSize = true }, 0, 0);
-            layout.Controls.Add(provider, 1, 0);
-            layout.Controls.Add(new Label { Text = "Central model", AutoSize = true }, 0, 1);
-            layout.Controls.Add(model, 1, 1);
-            layout.Controls.Add(new Label { Text = "Central token", AutoSize = true }, 0, 2);
-            layout.Controls.Add(token, 1, 2);
-            var clear = new Button { Text = "Token'ı sil", AutoSize = true };
-            clear.Click += (s, e) => token.Clear();
-            layout.Controls.Add(clear, 1, 3);
-            layout.Controls.Add(tls12, 1, 4);
+
+            var layout = new Ask.ai.ResponsiveTableLayoutPanel
+            {
+                AutoScroll = false, Padding = new Padding(20), ColumnCount = 1, RowCount = 4
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.Controls.Add(new Label
             {
-                Text = "TLS bağlantı hatasında deneyin. Yalnızca AI bağlantısı TLS 1.2 kullanır; sertifika doğrulaması açık kalır. Kapalıyken mevcut TLS seçimi kullanılır.",
-                AutoSize = true, Dock = DockStyle.Fill
-            }, 1, 5);
-            layout.Controls.Add(new Label { Text = "Central sertifika modu", AutoSize = true, Dock = DockStyle.Fill }, 0, 6);
-            certificateMode.Items.AddRange(new object[] { "Sunucu + ara/kök zinciri", "CA zincirine güven", "Sertifika paketi (CRL/OCSP kapalı)" });
-            layout.Controls.Add(certificateMode, 1, 6);
-            layout.Controls.Add(certificateInfo, 1, 7);
-            var certificateButtons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill };
-            certificateButtons.Controls.Add(selectCertificate);
-            certificateButtons.Controls.Add(clearCertificate);
-            layout.Controls.Add(certificateButtons, 1, 8);
-            selectCertificate.Click += SelectServerCertificate;
-            clearCertificate.Click += (sender, args) => { SetCurrentCertificateData(""); UpdateCertificateInfo(); };
-            layout.Controls.Add(certificateHelp, 1, 9);
-            layout.Controls.Add(new Label { Text = "Token bu Windows kullanıcısı için şifrelenir. Silmek için alanı temizleyip kaydedin.", AutoSize = true, Dock = DockStyle.Fill }, 1, 10);
-            var save = new Button { Text = "Kaydet", AutoSize = true };
+                Text = AiBrand.Name, AutoSize = true, Dock = DockStyle.Fill,
+                Font = new Font(Font.FontFamily, 18f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 4)
+            }, 0, 0);
+            layout.Controls.Add(new Label
+            {
+                Text = "Servisinizi seçin ve bağlantınızı yapılandırın.", AutoSize = true, Dock = DockStyle.Fill,
+                Margin = new Padding(0, 0, 0, 16)
+            }, 0, 1);
+            var tabs = new TabControl { Name = "SettingsTabs", Dock = DockStyle.Fill, Padding = new Point(14, 7), TabIndex = 0 };
+            var servicePage = new TabPage("Servis") { BackColor = SystemColors.Window };
+            var connectionPage = new TabPage("Bağlantı ve sertifika") { BackColor = SystemColors.Window };
+            tabs.TabPages.Add(servicePage);
+            tabs.TabPages.Add(connectionPage);
+            layout.Controls.Add(tabs, 0, 2);
+            BuildServicePage(servicePage);
+            BuildConnectionPage(connectionPage);
+
+            var actions = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, 12, 0, 0), TabIndex = 1
+            };
+            var save = new Button { Text = "&Kaydet", AutoSize = true, TabIndex = 0 };
+            StyleButton(save);
+            save.BackColor = SystemColors.Highlight;
+            save.ForeColor = SystemColors.HighlightText;
+            save.FlatStyle = FlatStyle.Flat;
+            save.FlatAppearance.BorderSize = 0;
             save.Click += SaveSettings;
-            layout.Controls.Add(save, 1, 11);
+            var cancel = new Button { Text = "&Vazgeç", AutoSize = true, DialogResult = DialogResult.Cancel, TabIndex = 1 };
+            StyleButton(cancel);
+            actions.Controls.Add(save);
+            actions.Controls.Add(cancel);
+            layout.Controls.Add(actions, 0, 3);
             Controls.Add(layout);
             AcceptButton = save;
+            CancelButton = cancel;
+            provider.FormattingEnabled = true;
+            provider.Format += (sender, args) => args.Value = (AiProvider)args.Value == AiProvider.Central ? AiBrand.PlusAi : AiBrand.Tab32;
             provider.Items.AddRange(new object[] { AiProvider.Central, AiProvider.Legacy });
             model.Items.AddRange(AppConfig.CentralModels);
             AiSettings settings;
             try { settings = AiSettings.Load(); }
             catch (InvalidOperationException ex)
             {
-                MessageBox.Show(ex.Message, "AI Ayarları", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 settings = new AiSettings();
             }
             provider.SelectedItem = settings.Provider;
@@ -98,9 +119,108 @@ namespace Askai
             UpdateEnabled();
         }
 
+        private void BuildServicePage(TabPage page)
+        {
+            var layout = CreatePageLayout();
+            provider.Name = "ServiceProvider";
+            provider.AccessibleName = "Servis";
+            model.Name = "Model";
+            model.AccessibleName = "PLUS AI model";
+            token.Name = "AccessToken";
+            token.AccessibleName = "PLUS AI erişim token’ı";
+            AddRow(layout, FieldLabel("&Servis"));
+            AddRow(layout, provider);
+            AddRow(layout, providerHelp);
+            AddRow(layout, SectionLabel("PLUS AI erişimi"));
+            AddRow(layout, FieldLabel("&Model"));
+            AddRow(layout, model);
+            AddRow(layout, FieldLabel("&Erişim token’ı"));
+            AddRow(layout, token);
+            StyleButton(clearToken);
+            clearToken.Click += (sender, args) => token.Clear();
+            var tokenActions = CreateButtonRow();
+            tokenActions.Controls.Add(clearToken);
+            AddRow(layout, tokenActions);
+            AddRow(layout, FieldLabel("Token bu Windows kullanıcısı için şifrelenir. Silmek için alanı temizleyip Kaydet’e basın."));
+            page.Controls.Add(layout);
+        }
+
+        private void BuildConnectionPage(TabPage page)
+        {
+            var layout = CreatePageLayout();
+            AddRow(layout, tls12);
+            AddRow(layout, FieldLabel("TLS bağlantı hatasında deneyin. Yalnızca servis bağlantısı TLS 1.2 kullanır; sertifika doğrulaması açık kalır."));
+            AddRow(layout, SectionLabel("PLUS AI sertifikaları"));
+            AddRow(layout, FieldLabel("&Sertifika modu"));
+            certificateMode.Name = "CertificateMode";
+            certificateMode.AccessibleName = "PLUS AI sertifika modu";
+            certificateMode.Items.AddRange(new object[] { "Sunucu + ara/kök zinciri", "CA zincirine güven", "Sertifika paketi (CRL/OCSP kapalı)" });
+            AddRow(layout, certificateMode);
+            certificateInfo.AccessibleName = "Seçilen sertifika bilgileri";
+            certificateInfo.BackColor = SystemColors.Control;
+            AddRow(layout, certificateInfo);
+            var buttons = CreateButtonRow();
+            StyleButton(selectCertificate);
+            StyleButton(clearCertificate);
+            buttons.Controls.Add(selectCertificate);
+            buttons.Controls.Add(clearCertificate);
+            AddRow(layout, buttons);
+            AddRow(layout, certificateHelp);
+            selectCertificate.Click += SelectServerCertificate;
+            clearCertificate.Click += (sender, args) => { SetCurrentCertificateData(""); UpdateCertificateInfo(); };
+            page.Controls.Add(layout);
+        }
+
+        private static Ask.ai.ResponsiveTableLayoutPanel CreatePageLayout()
+        {
+            var layout = new Ask.ai.ResponsiveTableLayoutPanel { Padding = new Padding(16), ColumnCount = 1, RowCount = 0 };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            return layout;
+        }
+
+        private static void AddRow(TableLayoutPanel layout, Control control)
+        {
+            int row = layout.RowCount++;
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            control.TabIndex = row;
+            control.Margin = new Padding(0, 3, 0, 7);
+            layout.Controls.Add(control, 0, row);
+        }
+
+        private static Label FieldLabel(string text)
+        {
+            return new Label { Text = text, AutoSize = true, Dock = DockStyle.Fill };
+        }
+
+        private Label SectionLabel(string text)
+        {
+            return new Label
+            {
+                Text = text, AutoSize = true, Dock = DockStyle.Fill,
+                Font = new Font(Font, FontStyle.Bold), Padding = new Padding(0, 16, 0, 4)
+            };
+        }
+
+        private static FlowLayoutPanel CreateButtonRow()
+        {
+            return new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill };
+        }
+
+        private static void StyleButton(Button button)
+        {
+            button.MinimumSize = new Size(112, 34);
+            button.Padding = new Padding(8, 3, 8, 3);
+            button.Margin = new Padding(0, 0, 8, 0);
+        }
+
         private void UpdateEnabled()
         {
             bool central = (AiProvider)provider.SelectedItem == AiProvider.Central;
+            providerHelp.Text = central
+                ? "PLUS AI için model ve erişim token’ınızı seçin."
+                : "TAB 3.2 yapılandırılmış servis bağlantısını kullanır. PLUS AI ayarlarınız korunur.";
+            clearToken.Enabled = central;
+            certificateHelp.Enabled = central;
             model.Enabled = central;
             token.Enabled = central;
             certificateInfo.Enabled = central;
@@ -138,7 +258,7 @@ namespace Askai
         private void UpdateCertificateInfo()
         {
             certificateHelp.Text = CurrentCertificateMode == CertificateTrustMode.CertificateBundle
-                ? "Python requests verify kullanımına benzer: kök + ara + sunucu paketi yüklenebilir. Adres, imza, süre ve kök zinciri doğrulanır; sunucu sertifikası sabitlenmez. CRL/OCSP kontrolü yapılmaz; iptal edilmiş sertifikalar tespit edilemeyebilir."
+                ? "Kök, ara ve isteğe bağlı sunucu sertifikalarını birlikte yükleyebilirsiniz. Adres, imza, süre ve kök zinciri doğrulanır; sunucu sertifikası sabitlenmez. CRL/OCSP kontrolü yapılmaz; iptal edilmiş sertifikalar tespit edilemeyebilir."
                 : CurrentCertificateMode == CertificateTrustMode.CertificateAuthority
                 ? "CA modu aynı köke uzanan yeni sunucu sertifikalarını da kabul eder. Yalnızca CA kök/ara .cer/.crt dosyaları seçin. Adres, süre ve iptal kontrolü korunur."
                 : "Tek sunucu sertifikası veya sunucu + ara/kök .cer/.crt zinciri seçin. Sunucu sertifikasına birebir eşleşme korunur. Windows sertifika deposu değişmez.";
@@ -179,8 +299,8 @@ namespace Askai
             catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException
                 || ex is System.Security.Cryptography.CryptographicException)
             {
-                MessageBox.Show("AI ayarları kaydedilemedi. Kullanıcı profilinin erişilebilir olduğunu kontrol edin.",
-                    "AI Ayarları", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Ayarlar kaydedilemedi. Kullanıcı profilinin erişilebilir olduğunu kontrol edin.",
+                    Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }

@@ -18,6 +18,11 @@
     <Compile Include="..\..\AiSettingsForm.cs" />
     <Compile Include="..\..\AiSettings.cs" />
     <Compile Include="..\..\AppConfig.cs" />
+    <Compile Include="..\..\AiBrand.cs" />
+    <Compile Include="..\..\AssistantIcon.cs" />
+    <EmbeddedResource Include="..\..\Assets\Assistant.ico">
+      <LogicalName>Ask.ai.Assets.Assistant.ico</LogicalName>
+    </EmbeddedResource>
     <Compile Include="..\..\ServerCertificateTrust.cs" />
     <Compile Include="..\..\CertificateMaterial.cs" />
     <Compile Include="..\..\AiConnectionErrors.cs" />

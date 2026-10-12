@@ -11,12 +11,14 @@ internal static class PopupLayoutTests
     private static void Main(string[] args)
     {
         CheckSettingsSelection();
+        CheckIconResources();
         if (args.Length == 1 && args[0] == "--settings-only")
         {
-            Console.WriteLine("Settings selection checks passed.");
+            Console.WriteLine("Settings selection and embedded icon checks passed.");
             return;
         }
         Application.EnableVisualStyles();
+        CheckSettingsForm();
         using (var input = new MailInputForm(false, true, "Örnek konu"))
         {
             CheckSizes(input);
@@ -77,6 +79,64 @@ internal static class PopupLayoutTests
             && settings.CentralCaCertificates == "ca-fixture", "Clearing the bundle leaves other trust modes intact.");
     }
 
+    private static void CheckIconResources()
+    {
+        Check(AssistantIcon.WindowIcon.Width == 32 && AssistantIcon.WindowIcon.Height == 32,
+            "The embedded icon must load at window size without a GUI.");
+        Check(AssistantIcon.RibbonImage.Width == 16 && AssistantIcon.RibbonImage.Height == 16,
+            "The same resource must provide a small ribbon image.");
+    }
+
+    private static void CheckSettingsForm()
+    {
+        using (var settings = new Askai.AiSettingsForm())
+        {
+            var provider = (ComboBox)FindControl(settings, "ServiceProvider");
+            var token = (TextBox)FindControl(settings, "AccessToken");
+            var clearToken = FindControl(settings, "ClearToken");
+            var certificateMode = FindControl(settings, "CertificateMode");
+            Check(provider.GetItemText(provider.Items[0]) == "PLUS AI"
+                && provider.GetItemText(provider.Items[1]) == "TAB 3.2", "Provider choices use their visible service names.");
+            provider.SelectedIndex = 0;
+            token.Text = "synthetic-ui-fixture";
+            Check(token.UseSystemPasswordChar, "The token remains masked.");
+            provider.SelectedIndex = 1;
+            Check(!token.Enabled && !clearToken.Enabled && !certificateMode.Enabled,
+                "TAB 3.2 must not allow editing or clearing PLUS AI credentials and trust settings.");
+            provider.SelectedIndex = 0;
+            Check(token.Enabled && clearToken.Enabled && certificateMode.Enabled
+                && token.Text == "synthetic-ui-fixture", "Switching services preserves PLUS AI credentials.");
+            Check(settings.AcceptButton != null && settings.CancelButton != null,
+                "Settings support keyboard save and cancel.");
+            var tabs = (TabControl)FindControl(settings, "SettingsTabs");
+            settings.Show();
+            foreach (TabPage page in tabs.TabPages)
+            {
+                tabs.SelectedTab = page;
+                CheckSizes(settings);
+                var save = (Control)settings.AcceptButton;
+                var cancel = (Control)settings.CancelButton;
+                Check(settings.ClientRectangle.Contains(settings.RectangleToClient(save.RectangleToScreen(save.ClientRectangle)))
+                    && settings.ClientRectangle.Contains(settings.RectangleToClient(cancel.RectangleToScreen(cancel.ClientRectangle))),
+                    "Settings actions stay outside the scrolling content.");
+            }
+            settings.Scale(new SizeF(1.5f, 1.5f));
+            foreach (TabPage page in tabs.TabPages)
+            {
+                tabs.SelectedTab = page;
+                CheckSizes(settings);
+            }
+            settings.Close();
+        }
+    }
+
+    private static Control FindControl(Control parent, string name)
+    {
+        var matches = parent.Controls.Find(name, true);
+        Check(matches.Length == 1, "Expected exactly one control: " + name);
+        return matches[0];
+    }
+
     private static void CheckSettingsColumns()
     {
         using (var form = new Form { ClientSize = new Size(560, 640) })
@@ -85,7 +145,7 @@ internal static class PopupLayoutTests
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
             for (int row = 0; row < 3; row++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.Controls.Add(new Label { Text = "Central sertifika modu", AutoSize = true }, 0, 0);
+            layout.Controls.Add(new Label { Text = "PLUS AI sertifika modu", AutoSize = true }, 0, 0);
             layout.Controls.Add(new ComboBox { Dock = DockStyle.Fill }, 1, 0);
             var help = new Label { Text = new string('W', 300), AutoSize = true, Dock = DockStyle.Fill };
             layout.Controls.Add(help, 1, 1);
@@ -119,6 +179,7 @@ internal static class PopupLayoutTests
         Application.DoEvents();
         foreach (Control control in parent.Controls)
         {
+            if (!control.Visible) continue;
             var label = control as Label;
             if (label != null && label.Text.Length > 0)
             {

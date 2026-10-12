@@ -45,7 +45,7 @@ namespace Askai
                 if (legacySingleLeaf)
                 {
                     if (IsAuthority(certificates[0]))
-                        throw new AiServiceException("Seçilen sertifika bir CA sertifikasıdır. AI Ayarları'nda CA zincirine güven modunu seçip kök/ara CA dosyalarını yeniden yükleyin.");
+                        throw new AiServiceException("Seçilen sertifika bir CA sertifikasıdır. Ayarlar → Bağlantı ve sertifika bölümünde CA zincirine güven modunu seçip kök/ara CA dosyalarını yeniden yükleyin.");
                     if (!HasServerUsage(certificates[0])) throw InvalidChain();
                     pinnedServer = certificates[0].RawData;
                     Description = "Sunucu: " + certificates[0].GetNameInfo(X509NameType.DnsName, false)
@@ -151,7 +151,7 @@ namespace Askai
             }
             if ((errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0)
             {
-                failure = "Sunucu adresi sertifikadaki adla eşleşmiyor. Central HTTPS adresini ve proxy sertifikasını kontrol edin.";
+                failure = "Sunucu adresi sertifikadaki adla eşleşmiyor. PLUS AI HTTPS adresini ve proxy sertifikasını kontrol edin.";
                 return false;
             }
             if ((errors & ~SslPolicyErrors.RemoteCertificateChainErrors) != SslPolicyErrors.None) return false;

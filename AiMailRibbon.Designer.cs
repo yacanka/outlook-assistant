@@ -51,11 +51,11 @@ namespace Ask.ai
             // 
             // btnAiReply
             // 
-            this.btnAiReply.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
-            this.btnAiReply.Label = "AI ile\nYanıtla";
+            this.btnAiReply.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
+            this.btnAiReply.Label = "Yanıtla";
             this.btnAiReply.Name = "btnAiReply";
             this.btnAiReply.OfficeImageId = "Reply";
-            this.btnAiReply.ScreenTip = "AI ile Yanıtla";
+            this.btnAiReply.ScreenTip = "Yanıtla";
             this.btnAiReply.ShowImage = true;
             this.btnAiReply.SuperTip = "Seçili e-postanın içeriğini yapay zekaya gönderir ve gelen yanıtı Reply olarak hazırlar.";
             this.btnAiReply.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnAiReply_Click);
@@ -66,11 +66,11 @@ namespace Ask.ai
             // 
             // btnAiReplyAll
             // 
-            this.btnAiReplyAll.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
-            this.btnAiReplyAll.Label = "AI ile\nTümünü Yanıtla";
+            this.btnAiReplyAll.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
+            this.btnAiReplyAll.Label = "Tümünü Yanıtla";
             this.btnAiReplyAll.Name = "btnAiReplyAll";
             this.btnAiReplyAll.OfficeImageId = "ReplyAll";
-            this.btnAiReplyAll.ScreenTip = "AI ile Tümünü Yanıtla";
+            this.btnAiReplyAll.ScreenTip = "Tümünü Yanıtla";
             this.btnAiReplyAll.ShowImage = true;
             this.btnAiReplyAll.SuperTip = "Seçili e-postanın içeriğini yapay zekaya gönderir ve gelen yanıtı Reply All olarak hazırlar.";
             this.btnAiReplyAll.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnAiReplyAll_Click);

@@ -14,7 +14,7 @@ namespace Ask.ai
         {
             if (Interlocked.CompareExchange(ref running, 1, 0) != 0)
             {
-                MessageBox.Show("Önce devam eden AI işlemini tamamlayın veya iptal edin.", "AI Mail Asistanı");
+                MessageBox.Show("Önce devam eden AI işlemini tamamlayın veya iptal edin.", AiBrand.Name);
                 return;
             }
             try
@@ -99,7 +99,7 @@ namespace Ask.ai
 
         private static void ShowError(string message)
         {
-            MessageBox.Show(message, "AI Mail Asistanı", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(message, AiBrand.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 }

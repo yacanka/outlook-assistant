@@ -17,7 +17,8 @@ namespace Ask.ai
 
         public MailInputForm(bool composing, bool replyAll, string sourceSubject)
         {
-            Text = composing ? "AI ile mail hazırla" : replyAll ? "AI ile tümünü yanıtla" : "AI ile yanıtla";
+            Text = composing ? "Mail Hazırla" : replyAll ? "Tümünü Yanıtla" : "Yanıtla";
+            Icon = AssistantIcon.WindowIcon;
             Font = new Font("Segoe UI", 10f);
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;

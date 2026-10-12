@@ -2,7 +2,7 @@
 {
     public static class AppConfig
     {
-        // Central: tam HTTPS chat-completions URL ve servis model kimliklerini doldurun.
+        // PLUS AI: tam HTTPS chat-completions URL ve servis model kimliklerini doldurun.
         public static string CentralApiUrl = "";
         public static string[] CentralModels = new string[0];
 

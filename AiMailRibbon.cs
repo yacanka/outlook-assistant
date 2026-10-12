@@ -14,21 +14,31 @@ namespace Ask.ai
         {
             var compose = Factory.CreateRibbonButton();
             compose.Name = "btnAiCompose";
-            compose.Label = "AI ile mail hazırla";
+            compose.Label = "Mail Hazırla";
             compose.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
             compose.OfficeImageId = "NewMailMessage";
             compose.ShowImage = true;
             compose.ScreenTip = "Konudan yeni mail hazırla";
             compose.SuperTip = "Konu ve talimatınızdan içerik hazırlar. Onayınızla yeni mail açar; mail göndermez.";
             compose.Click += async (sender, args) => await MailActionRunner.RunAsync(MailCapability.Compose, args.Control.Context);
+            grpAiAssistant.Items.Remove(separator1);
             grpAiAssistant.Items.Insert(0, compose);
             btnAiReply.SuperTip = "Seçili mail için yanıt hazırlar. Onayınızdan sonra Outlook yanıt taslağını açar; mail göndermez.";
             btnAiReplyAll.SuperTip = "Seçili mail için tümünü yanıtla taslağı hazırlar. Aktarım için onayınızı bekler; mail göndermez.";
             var settings = Factory.CreateRibbonButton();
-            settings.Label = "AI Ayarları";
+            settings.Label = "Ayarlar";
             settings.Name = "btnAiSettings";
+            settings.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
+            settings.Image = AssistantIcon.RibbonImage;
+            settings.ShowImage = true;
+            settings.ScreenTip = "AI Asistan ayarları";
+            settings.SuperTip = "Servis, model, token ve bağlantı ayarlarını düzenleyin.";
             settings.Click += (sender, args) => { using (var dialog = new AiSettingsForm()) dialog.ShowDialog(); };
-            grpAiAssistant.Items.Add(settings);
+            var preferences = Factory.CreateRibbonGroup();
+            preferences.Name = "grpAiPreferences";
+            preferences.Label = "Tercihler";
+            preferences.Items.Add(settings);
+            tabMail.Groups.Add(preferences);
         }
 
         private async void btnAiReply_Click(object sender, RibbonControlEventArgs e)

@@ -7,12 +7,12 @@ using System.Security;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("Ask.ai")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyTitle("AI Asistan")]
+[assembly: AssemblyDescription("Outlook e-postalarını hazırlama, yanıtlama ve metin iyileştirme asistanı")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("YaCanKa")]
-[assembly: AssemblyProduct("Ask.ai")]
-[assembly: AssemblyCopyright("Ask.ai © 2026")]
+[assembly: AssemblyProduct("AI Asistan")]
+[assembly: AssemblyCopyright("AI Asistan © 2026")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

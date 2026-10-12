@@ -24,11 +24,11 @@ namespace Askai
             if (!Uri.TryCreate(AppConfig.CentralApiUrl, UriKind.Absolute, out uri)
                 || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo)
                 || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-                throw new InvalidOperationException("Central servis için config içinde geçerli bir HTTPS URL tanımlayın.");
+                throw new InvalidOperationException("PLUS AI servisi için config içinde geçerli bir HTTPS URL tanımlayın.");
             if (string.IsNullOrWhiteSpace(model) || !AppConfig.CentralModels.Contains(model))
-                throw new InvalidOperationException("AI Ayarları üzerinden yapılandırılmış bir model seçin.");
+                throw new InvalidOperationException("Ayarlar → Servis üzerinden yapılandırılmış bir PLUS AI modeli seçin.");
             if (string.IsNullOrWhiteSpace(token) || token.IndexOfAny(new[] { '\r', '\n' }) >= 0)
-                throw new InvalidOperationException("AI Ayarları üzerinden geçerli bir token girin.");
+                throw new InvalidOperationException("Ayarlar → Servis üzerinden geçerli bir PLUS AI token’ı girin.");
             if (string.IsNullOrWhiteSpace(prompt)) throw new ArgumentException("İstek boş olamaz.");
             var payload = JsonSerializer.Serialize(new
             {
@@ -52,7 +52,7 @@ namespace Askai
                 {
                     using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false))
                     {
-                        AiConnectionErrors.CheckResponse(response, "Central", requireEventStream: true);
+                        AiConnectionErrors.CheckResponse(response, AiBrand.PlusAi, requireEventStream: true);
                         using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                         using (deadline.Token.Register(() => stream.Dispose()))
                             return await ReadEventsAsync(stream, onChunk, deadline.Token).ConfigureAwait(false);
@@ -61,11 +61,11 @@ namespace Askai
                 catch (Exception) when (deadline.IsCancellationRequested)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    throw new TimeoutException("Central AI isteği zaman aşımına uğradı.");
+                    throw new TimeoutException("PLUS AI isteği zaman aşımına uğradı.");
                 }
                 catch (HttpRequestException ex) when (!(ex is AiServiceException))
                 {
-                    throw AiConnectionErrors.FromTransport("Central", ex, request);
+                    throw AiConnectionErrors.FromTransport(AiBrand.PlusAi, ex, request);
                 }
             }
         }
@@ -133,6 +133,6 @@ namespace Askai
             catch (JsonException) { throw InvalidStream(); }
             catch (InvalidOperationException) { throw InvalidStream(); }
         }
-        private static IOException InvalidStream() { return new AiResponseException("Central"); }
+        private static IOException InvalidStream() { return new AiResponseException(AiBrand.PlusAi); }
     }
 }

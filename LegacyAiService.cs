@@ -18,7 +18,7 @@ namespace Askai
         public LegacyAiService(HttpClient client) { this.client = client ?? throw new ArgumentNullException(nameof(client)); }
 
         /// <summary>
-        /// Retains the Legacy line-oriented response contract, including raw text and clean EOF.
+        /// Retains the TAB 3.2 line-oriented response contract, including raw text and clean EOF.
         /// Explicit incomplete/error records, invalid JSON and transport failures are rejected.
         /// </summary>
         public async Task<string> SendStreamingRequestAsync(string userPrompt, Action<string> onChunk,
@@ -46,7 +46,7 @@ namespace Askai
                 {
                     using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false))
                     {
-                        AiConnectionErrors.CheckResponse(response, "Legacy", requireEventStream: false);
+                        AiConnectionErrors.CheckResponse(response, AiBrand.Tab32, requireEventStream: false);
                         using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                         using (deadline.Token.Register(() => stream.Dispose()))
                         {
@@ -57,12 +57,12 @@ namespace Askai
                 catch (Exception) when (deadline.IsCancellationRequested)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    throw new TimeoutException("Legacy AI isteği zaman aşımına uğradı.");
+                    throw new TimeoutException("TAB 3.2 isteği zaman aşımına uğradı.");
                 }
                 catch (DecoderFallbackException) { throw InvalidStream(); }
                 catch (HttpRequestException ex) when (!(ex is AiServiceException))
                 {
-                    throw AiConnectionErrors.FromTransport("Legacy", ex);
+                    throw AiConnectionErrors.FromTransport(AiBrand.Tab32, ex);
                 }
             }
         }
@@ -171,7 +171,7 @@ namespace Askai
 
             public string Complete()
             {
-                // Older Legacy servers have no terminator. A clean HTTP EOF is their contract;
+                // Older TAB 3.2 servers have no terminator. A clean HTTP EOF is their contract;
                 // explicit done:false, broken records and read failures must still fail closed.
                 if (pendingJson.Length != 0 || requiresCompletion || result.Length == 0) throw InvalidStream();
                 return Result;
@@ -233,6 +233,6 @@ namespace Askai
             return content.GetString();
         }
 
-        private static IOException InvalidStream() { return new AiResponseException("Legacy"); }
+        private static IOException InvalidStream() { return new AiResponseException(AiBrand.Tab32); }
     }
 }

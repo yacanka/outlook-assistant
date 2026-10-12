@@ -39,11 +39,12 @@
     <UpdateEnabled>true</UpdateEnabled>
     <UpdateInterval>7</UpdateInterval>
     <UpdateIntervalUnits>days</UpdateIntervalUnits>
-    <ProductName>Ask.ai</ProductName>
+    <ProductName>AI Asistan</ProductName>
     <PublisherName>YaCanKa</PublisherName>
     <SupportUrl />
-    <FriendlyName>Ask.ai</FriendlyName>
-    <OfficeApplicationDescription />
+    <FriendlyName>AI Asistan</FriendlyName>
+    <ApplicationIcon>Assets\Assistant.ico</ApplicationIcon>
+    <OfficeApplicationDescription>E-postalarınızı hazırlayın, yanıtlayın ve metinlerinizi iyileştirin.</OfficeApplicationDescription>
     <LoadBehavior>3</LoadBehavior>
   </PropertyGroup>
   <ItemGroup>
@@ -196,6 +197,8 @@
   -->
   <ItemGroup>
     <Compile Include="AppConfig.cs" />
+    <Compile Include="AiBrand.cs" />
+    <Compile Include="AssistantIcon.cs" />
     <Compile Include="AiService.cs" />
     <Compile Include="MailGeneration.cs" />
     <Compile Include="OutlookMailTarget.cs" />
@@ -236,6 +239,11 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <EmbeddedResource Include="Assets\Assistant.ico">
+      <LogicalName>Ask.ai.Assets.Assistant.ico</LogicalName>
+    </EmbeddedResource>
+    <None Include="Assets\Assistant.svg" />
+    <None Include="Assets\Assistant.png" />
     <None Include="Ask.ai_TemporaryKey.pfx" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
