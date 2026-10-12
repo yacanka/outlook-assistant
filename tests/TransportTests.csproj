@@ -9,6 +9,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="MailFormattingTests.cs" />
+    <Compile Include="../MailFormatting.cs" />
     <Compile Include="MailGenerationTests.cs" />
     <Compile Include="OutlookAdapterTests.cs" />
     <Compile Include="OfficeSimulation.cs" />
@@ -27,5 +29,8 @@
     <Compile Include="../CertificateMaterial.cs" />
     <Compile Include="../AppConfig.cs" />
     <Compile Include="../AiBrand.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.4.0" />
   </ItemGroup>
 </Project>

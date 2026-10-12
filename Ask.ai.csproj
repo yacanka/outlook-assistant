@@ -27,6 +27,7 @@
     <RootNamespace>Ask.ai</RootNamespace>
     <AssemblyName>Ask.ai</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <DefineConstants>VSTO40;UseOfficeInterop</DefineConstants>
     <ResolveComReferenceSilent>true</ResolveComReferenceSilent>
     <IsWebBootstrapper>False</IsWebBootstrapper>
@@ -165,6 +166,9 @@
       <Private>True</Private>
     </Reference>
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.4.0" />
+  </ItemGroup>
   <Choose>
     <When Condition="$([System.String]::Copy(&quot;;$(DefineConstants);&quot;).ToLower().Contains(';useofficeinterop;')) or $([System.String]::Copy(&quot;,$(DefineConstants),&quot;).ToLower().Contains(',useofficeinterop,'))">
       <ItemGroup>
@@ -201,6 +205,7 @@
     <Compile Include="AssistantIcon.cs" />
     <Compile Include="AiService.cs" />
     <Compile Include="MailGeneration.cs" />
+    <Compile Include="MailFormatting.cs" />
     <Compile Include="OutlookMailTarget.cs" />
     <Compile Include="MailActionRunner.cs" />
     <Compile Include="MailInputForm.cs" />
@@ -244,6 +249,9 @@
     </EmbeddedResource>
     <None Include="Assets\Assistant.svg" />
     <None Include="Assets\Assistant.png" />
+    <Content Include="THIRD-PARTY-NOTICES.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="Ask.ai_TemporaryKey.pfx" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>

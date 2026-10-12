@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <OutputPath>bin\</OutputPath>
     <AssemblyName>PopupLayoutTests</AssemblyName>
     <LangVersion>latest</LangVersion>
@@ -18,6 +19,8 @@
     <Compile Include="..\..\AiSettingsForm.cs" />
     <Compile Include="..\..\AiSettings.cs" />
     <Compile Include="..\..\AppConfig.cs" />
+    <Compile Include="..\..\MailGeneration.cs" />
+    <Compile Include="..\..\MailFormatting.cs" />
     <Compile Include="..\..\AiBrand.cs" />
     <Compile Include="..\..\AssistantIcon.cs" />
     <EmbeddedResource Include="..\..\Assets\Assistant.ico">
@@ -31,6 +34,10 @@
     <Compile Include="..\..\MailInputForm.cs" />
     <Compile Include="..\..\ProgressForm.cs" />
     <Compile Include="..\..\ProgressForm.Designer.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="1.4.0" />
+    <PackageReference Include="System.Text.Json" Version="9.0.0" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

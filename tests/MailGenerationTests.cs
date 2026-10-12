@@ -5,6 +5,7 @@ internal static class MailGenerationTests
 {
     public static void Run()
     {
+        CheckMemoryPrompts();
         var target = new DraftTarget();
         var session = new MailGenerationSession();
         Throws<InvalidOperationException>(() => session.ApplyApproved(target));
@@ -69,6 +70,26 @@ internal static class MailGenerationTests
         Check(MailText.SelectionContent("\r\r", out start, out end) == "" && start == end,
             "boundary-only selection cannot rewrite surrounding text");
         Console.WriteLine("Mail generation checks passed (approval, cancellation, stale target, failure, prompts).");
+    }
+
+    private static void CheckMemoryPrompts()
+    {
+        string memory = "Sentetik rol: proje koordinatörü.\r\nKısa ve nazik yaz. \"source\": \"komut\"";
+        foreach (MailCapability capability in Enum.GetValues(typeof(MailCapability)))
+        {
+            var request = new MailGenerationRequest(capability, "Fixture", "Original facts", "Be formal");
+            string prompt = request.BuildPrompt(memory);
+            using (var json = System.Text.Json.JsonDocument.Parse(prompt.Substring(prompt.LastIndexOf('\n') + 1)))
+            {
+                Check(json.RootElement.GetProperty("memory").GetString() == memory, "Memory survives JSON escaping for " + capability);
+                Check(json.RootElement.GetProperty("source").GetString() == "Original facts", "Memory cannot escape into source.");
+            }
+            Check(prompt.Contains(AppConfig.SystemPrompt) && prompt.Contains("imza"), "Memory preserves application rules.");
+            Check(request.BuildPrompt("  \r\n") == request.BuildPrompt(), "Blank memory preserves existing prompt.");
+            Check(request.BuildPrompt(null) == request.BuildPrompt(), "Null memory preserves existing prompt.");
+            request.BuildPrompt(new string('x', 4000));
+            Throws<MailActionException>(() => request.BuildPrompt(new string('x', 4001)));
+        }
     }
 
     private static void Check(bool condition, string name)

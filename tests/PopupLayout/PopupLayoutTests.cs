@@ -11,10 +11,12 @@ internal static class PopupLayoutTests
     private static void Main(string[] args)
     {
         CheckSettingsSelection();
+        CheckMarkdownSettings();
+        CheckMemorySettings();
         CheckIconResources();
         if (args.Length == 1 && args[0] == "--settings-only")
         {
-            Console.WriteLine("Settings selection and embedded icon checks passed.");
+            Console.WriteLine("Settings checks passed (selection, Markdown, encrypted memory, length limits, corrupt records, embedded icon).");
             return;
         }
         Application.EnableVisualStyles();
@@ -44,6 +46,41 @@ internal static class PopupLayoutTests
             CheckContent(progress);
             progress.Scale(new SizeF(1.5f, 1.5f));
             CheckSizes(progress);
+            progress.FinishAndClose();
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Test", "Test"))
+        {
+            progress.Show();
+            progress.ReportChunk("First\n\nSecond\rThird");
+            progress.SetReady();
+            var preview = FindPreview(progress);
+            Check(preview.Lines.Length == 4 && preview.Lines[1] == "" && preview.Lines[3] == "Third",
+                "Plain preview displays LF, empty lines and standalone CR on separate lines.");
+            progress.FinishAndClose();
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Test", "Test", true))
+        {
+            progress.Show();
+            progress.ReportChunk("# Başlık\n\n**Kal");
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            var preview = FindPreview(progress);
+            while (preview.Text.Length == 0 && DateTime.UtcNow < deadline) Application.DoEvents();
+            Check(preview.Text.Contains("Başlık"), "Partial Markdown is visible while streaming.");
+            progress.ReportChunk("ın**\nAlt satır");
+            progress.SetReady("# Başlık\n\n**Kalın**\nAlt satır");
+            Check(preview.Text.Contains("Kalın\nAlt satır"), "Rich preview preserves soft line breaks.");
+            preview.Select(preview.Text.IndexOf("Kalın"), 5);
+            Check(preview.SelectionFont.Bold, "Markdown emphasis is visibly bold in RichEdit.");
+            progress.FinishAndClose();
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Test", "Test", true, false))
+        {
+            progress.Show();
+            progress.SetReady("**Kalın**\nAlt satır");
+            Check(FindPreview(progress).Text.Replace("\r\n", "\n") == "Kalın\nAlt satır", "Plain target preview matches its readable transfer.");
             progress.FinishAndClose();
         }
         using (var input = new MailInputForm(true, false, ""))
@@ -79,6 +116,66 @@ internal static class PopupLayoutTests
             && settings.CentralCaCertificates == "ca-fixture", "Clearing the bundle leaves other trust modes intact.");
     }
 
+    private static void CheckMarkdownSettings()
+    {
+        string folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "askai-settings-test-" + Guid.NewGuid().ToString("N"));
+        string path = System.IO.Path.Combine(folder, "settings.xml");
+        System.IO.Directory.CreateDirectory(folder);
+        try
+        {
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider><Model>fixture</Model></AiSettings>");
+            var settings = Askai.AiSettings.Load(path);
+            Check(!settings.ApplyMarkdown, "Existing settings default to plain text.");
+            settings.ApplyMarkdown = true;
+            settings.Save(path);
+            Check(Askai.AiSettings.Load(path).ApplyMarkdown, "Markdown choice survives save and reload.");
+            settings.ApplyMarkdown = false;
+            settings.Save(path);
+            Check(!Askai.AiSettings.Load(path).ApplyMarkdown, "Disabling Markdown persists.");
+        }
+        finally { System.IO.Directory.Delete(folder, true); }
+    }
+
+    private static void CheckMemorySettings()
+    {
+        string folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "askai-memory-test-" + Guid.NewGuid().ToString("N"));
+        string path = System.IO.Path.Combine(folder, "settings.xml");
+        System.IO.Directory.CreateDirectory(folder);
+        try
+        {
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider></AiSettings>");
+            var settings = Askai.AiSettings.Load(path);
+            Check(settings.MemoryEnabled && settings.MemoryText == "", "Old settings have no active personal context.");
+            string memory = "Sentetik rol: koordinatör.\r\nKısa yaz. <>&\"";
+            settings.MemoryText = memory;
+            settings.Save(path);
+            Check(!System.IO.File.ReadAllText(path).Contains("koordinatör"), "Personal context must not be stored in plain text.");
+            var loaded = Askai.AiSettings.Load(path);
+            Check(loaded.MemoryText == memory && loaded.MemoryEnabled, "Multiline Unicode memory survives encryption and reload.");
+            loaded.MemoryEnabled = false;
+            loaded.Save(path);
+            loaded = Askai.AiSettings.Load(path);
+            Check(!loaded.MemoryEnabled && loaded.MemoryText == memory, "Disabling memory preserves personal context.");
+            loaded.MemoryText = new string('x', 4000);
+            loaded.Save(path);
+            Check(Askai.AiSettings.Load(path).MemoryText.Length == 4000, "Maximum length memory is preserved.");
+            loaded.MemoryText += "x";
+            bool rejected = false;
+            try { loaded.Save(path); }
+            catch (ArgumentException) { rejected = true; }
+            Check(rejected && Askai.AiSettings.Load(path).MemoryText.Length == 4000, "Oversized memory is rejected without overwriting settings.");
+            loaded.MemoryText = "";
+            loaded.Save(path);
+            Check(Askai.AiSettings.Load(path).MemoryText == "", "Clearing memory persists.");
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider><MemoryText>invalid-base64</MemoryText></AiSettings>");
+            bool unreadable = false;
+            try { Askai.AiSettings.Load(path); }
+            catch (InvalidOperationException ex) { unreadable = !ex.Message.Contains("invalid-base64"); }
+            Check(unreadable, "Corrupt encrypted memory returns a safe settings error.");
+        }
+        finally { System.IO.Directory.Delete(folder, true); }
+    }
+
     private static void CheckIconResources()
     {
         Check(AssistantIcon.WindowIcon.Width == 32 && AssistantIcon.WindowIcon.Height == 32,
@@ -95,12 +192,27 @@ internal static class PopupLayoutTests
             var token = (TextBox)FindControl(settings, "AccessToken");
             var clearToken = FindControl(settings, "ClearToken");
             var certificateMode = FindControl(settings, "CertificateMode");
+            var markdown = (CheckBox)FindControl(settings, "ApplyMarkdown");
+            markdown.Checked = true;
+            var memory = (TextBox)FindControl(settings, "MemoryText");
+            var memoryEnabled = (CheckBox)FindControl(settings, "MemoryEnabled");
+            var memoryCount = (Label)FindControl(settings, "MemoryCount");
+            Check(memory.Multiline && memory.AcceptsReturn && memory.MaxLength == 0,
+                "Memory supports multiline editing without silently truncating pasted text.");
+            memory.Text = "Sentetik rol\r\nKısa yaz";
+            Check(memoryCount.Text.StartsWith(memory.TextLength.ToString()), "Memory counter follows edits.");
+            memoryEnabled.Checked = false;
+            Check(memory.Text.Contains("Sentetik rol"), "Disabling memory preserves the editor text.");
+            memory.Text = new string('x', 4001);
+            Check(memory.TextLength == 4001, "Oversized pasted memory is retained for correction.");
+            memory.Clear();
             Check(provider.GetItemText(provider.Items[0]) == "PLUS AI"
                 && provider.GetItemText(provider.Items[1]) == "TAB 3.2", "Provider choices use their visible service names.");
             provider.SelectedIndex = 0;
             token.Text = "synthetic-ui-fixture";
             Check(token.UseSystemPasswordChar, "The token remains masked.");
             provider.SelectedIndex = 1;
+            Check(markdown.Enabled && markdown.Checked, "Markdown preference applies independently of the provider.");
             Check(!token.Enabled && !clearToken.Enabled && !certificateMode.Enabled,
                 "TAB 3.2 must not allow editing or clearing PLUS AI credentials and trust settings.");
             provider.SelectedIndex = 0;
@@ -110,6 +222,10 @@ internal static class PopupLayoutTests
                 "Settings support keyboard save and cancel.");
             var tabs = (TabControl)FindControl(settings, "SettingsTabs");
             settings.Show();
+            tabs.SelectedTab = (TabPage)memory.Parent.Parent;
+            memory.Text = "Synthetic context";
+            ((Button)FindControl(settings, "ClearMemory")).PerformClick();
+            Check(memory.Text == "", "Clear memory empties the editor.");
             foreach (TabPage page in tabs.TabPages)
             {
                 tabs.SelectedTab = page;
@@ -203,11 +319,11 @@ internal static class PopupLayoutTests
             Check(!scrollable.HorizontalScroll.Visible, "Popup must not require horizontal scrolling.");
     }
 
-    private static TextBox FindPreview(Control parent)
+    private static RichTextBox FindPreview(Control parent)
     {
         foreach (Control control in parent.Controls)
         {
-            var preview = control as TextBox;
+            var preview = control as RichTextBox;
             if (preview != null && preview.Multiline) return preview;
             var found = FindPreview(control);
             if (found != null) return found;

@@ -10,6 +10,18 @@ internal static class OutlookAdapterTests
         var app = new Outlook.Application();
         using (var target = OutlookMailTarget.Capture(app, null, MailCapability.Compose))
         {
+            target.ApplyMarkdown = true;
+            Approve(target, "**Prepared**\nNext");
+            var richDraft = app.Created[app.Created.Count - 1];
+            Check(richDraft.BodyFormat == Outlook.OlBodyFormat.olFormatHTML, "Markdown compose creates HTML mail");
+            Check(richDraft.GetInspector.Document.LastInsertedRtf.Contains("\\b "), "rich compose imports bold text");
+            Check(richDraft.GetInspector.Document.LastInsertStart == 0 && richDraft.GetInspector.Document.LastInsertEnd == 0,
+                "rich compose only inserts before signature");
+            Check(!System.IO.File.Exists(richDraft.GetInspector.Document.LastInsertPath), "temporary RTF removed after insertion");
+        }
+        app = new Outlook.Application();
+        using (var target = OutlookMailTarget.Capture(app, null, MailCapability.Compose))
+        {
             target.SetNewSubject("Project update");
             var session = new MailGenerationSession();
             session.Complete("Prepared message");
@@ -30,6 +42,53 @@ internal static class OutlookAdapterTests
             inspector.Document.Select(0, 6); // Moving the cursor must not retarget the result.
             Approve(target, "New text");
             Check(source.Body == "Before\rNew text\rSignature\r", "initial range and signature boundary preserved");
+        }
+
+        source = new Outlook.MailItem(app) { Body = "Before\rOld paragraph\rSignature\r", BodyFormat = Outlook.OlBodyFormat.olFormatHTML };
+        inspector = source.GetInspector;
+        inspector.Document.Select(7, 21);
+        using (var target = OutlookMailTarget.Capture(app, inspector, MailCapability.Improve))
+        {
+            target.ApplyMarkdown = true;
+            Approve(target, "**New**");
+            Check(inspector.Document.LastInsertStart == 7 && inspector.Document.LastInsertEnd == 20,
+                "rich improvement keeps boundary paragraph outside imported range");
+            Check(source.Body.StartsWith("Before\r") && source.Body.EndsWith("\rSignature\r"), "rich import preserves outer text");
+            Check(inspector.Document.LastInsertedRtf.Contains("\\b "), "rich improvement imports formatting");
+        }
+        source = new Outlook.MailItem(app) { Body = "Old\rSignature\r", BodyFormat = Outlook.OlBodyFormat.olFormatPlain };
+        inspector = source.GetInspector;
+        inspector.Document.Select(0, 3);
+        using (var target = OutlookMailTarget.Capture(app, inspector, MailCapability.Improve))
+        {
+            target.ApplyMarkdown = true;
+            Check(!target.SupportsRichText, "plain target reports its limitation before approval");
+            Approve(target, "**New**\nSecond");
+            Check(source.Body == "New\rSecond\rSignature\r" && source.BodyFormat == Outlook.OlBodyFormat.olFormatPlain,
+                "plain target gets readable text without format conversion");
+        }
+        source = new Outlook.MailItem(app) { Body = "Prefix old suffix\rSignature\r", BodyFormat = Outlook.OlBodyFormat.olFormatHTML };
+        inspector = source.GetInspector;
+        inspector.Document.Select(7, 10);
+        inspector.Document.ParagraphFormat.LeftIndent = 42;
+        inspector.Document.ListFormat.ListType = 1;
+        inspector.Document.ListFormat.ListLevelNumber = 2;
+        using (var target = OutlookMailTarget.Capture(app, inspector, MailCapability.Improve))
+        {
+            target.ApplyMarkdown = true;
+            Approve(target, "# New");
+            Check(inspector.Document.ParagraphFormat.LeftIndent == 42, "partial paragraph retains its original paragraph formatting");
+            Check(inspector.Document.ListFormat.ListType == 1 && inspector.Document.ListFormat.ListLevelNumber == 2
+                && inspector.Document.ListFormat.LastApplyTo == 2, "boundary list restored only to retained paragraph");
+        }
+        source = new Outlook.MailItem(app) { Body = "Original\rSignature\r", BodyFormat = Outlook.OlBodyFormat.olFormatHTML };
+        inspector = source.GetInspector;
+        inspector.Document.Select(0, 8);
+        using (var target = OutlookMailTarget.Capture(app, inspector, MailCapability.Improve))
+        {
+            target.ApplyMarkdown = true;
+            Throws<MailActionException>(() => Approve(target, "[id]: https://example.invalid"));
+            Check(source.Body == "Original\rSignature\r", "empty visible Markdown cannot erase the selection");
         }
 
         foreach (string change in new[] { "body", "word-only", "subject", "sent", "submitted", "closed", "identity" })
@@ -92,13 +151,18 @@ internal static class OutlookAdapterTests
             }
         }
 
+        foreach (bool markdown in new[] { false, true })
         foreach (string failure in new[] { "display", "editor", "insert" })
         {
             app.NextFailure = failure;
             using (var target = OutlookMailTarget.Capture(app, null, MailCapability.Compose))
             {
-                Throws<Exception>(() => Approve(target, "Prepared content"));
-                Check(app.Created[app.Created.Count - 1].Discarded, "failed new draft discarded: " + failure);
+                target.ApplyMarkdown = markdown;
+                Throws<Exception>(() => Approve(target, "**Prepared** content"));
+                var failedDraft = app.Created[app.Created.Count - 1];
+                Check(failedDraft.Discarded, "failed new draft discarded: " + failure);
+                if (markdown && failure == "insert")
+                    Check(!System.IO.File.Exists(failedDraft.GetInspector.Document.LastInsertPath), "failed RTF import cleans temporary file");
             }
         }
         Console.WriteLine("Outlook adapter simulations passed (captured range, stale target, reply, draft cleanup). Real COM still requires Windows.");

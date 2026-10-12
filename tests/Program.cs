@@ -10,9 +10,13 @@ using System.Threading.Tasks;
 using Askai;
 class Program
 {
-    static async Task Main()
+    static async Task Main(string[] args)
     {
         MailGenerationTests.Run();
+        MailFormattingTests.Run();
+        if (args.Length == 2 && args[0] == "--rtf-fixtures") { MailFormattingTests.WriteFixtures(args[1]); return; }
+        if (Array.IndexOf(args, "--mail-only") >= 0) { OutlookAdapterTests.Run(); return; }
+        await CheckMemoryTransportAsync();
         TlsPolicyTests.Run();
         ServerCertificateTests.Run();
         CertificateChainTests.Run();
@@ -61,6 +65,47 @@ class Program
         }
         Console.WriteLine("All transport checks passed (including cancellation during body read).");
     }
+    static async Task CheckMemoryTransportAsync()
+    {
+        var handler = new FakeHandler();
+        var client = new HttpClient(handler);
+        var central = new CentralAiService(client);
+        var legacy = new LegacyAiService(client);
+        string originalUrl = AppConfig.CentralApiUrl;
+        string[] originalModels = AppConfig.CentralModels;
+        AppConfig.CentralApiUrl = "https://example.invalid/chat";
+        AppConfig.CentralModels = new[] { "fixture-model" };
+        try
+        {
+            foreach (MailCapability capability in Enum.GetValues(typeof(MailCapability)))
+            {
+                string prompt = new MailGenerationRequest(capability, "Fixture", "Original facts", "Be formal")
+                    .BuildPrompt("Sentetik rol: koordinatör");
+                await central.SendAsync(prompt, "fixture-model", "fixture-token", null, CancellationToken.None);
+                using (var body = JsonDocument.Parse(handler.Body))
+                {
+                    var messages = body.RootElement.GetProperty("messages");
+                    Check(messages[0].GetProperty("content").GetString() == AppConfig.SystemPrompt, "Memory preserves central system prompt.");
+                    Check(messages[1].GetProperty("content").GetString() == prompt, "Central transport sends personal context for " + capability);
+                }
+                await legacy.SendStreamingRequestAsync(prompt, null, CancellationToken.None);
+                using (var body = JsonDocument.Parse(handler.Body))
+                {
+                    Check(body.RootElement.GetProperty("question").GetString() == prompt, "Legacy question includes personal context for " + capability);
+                    Check(body.RootElement.GetProperty("context_messages")[0].GetProperty("content").GetString() == prompt,
+                        "Legacy messages preserve personal context.");
+                }
+            }
+            Console.WriteLine("Personal memory transport checks passed for both providers and all mail actions.");
+        }
+        finally
+        {
+            AppConfig.CentralApiUrl = originalUrl;
+            AppConfig.CentralModels = originalModels;
+            client.Dispose();
+        }
+    }
+
     static void Check(bool condition, string name) { if (!condition) throw new Exception(name); }
     static async Task Fails(Func<Task<string>> action, string name)
     {
@@ -84,7 +129,7 @@ class Program
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            Body = await request.Content.ReadAsStringAsync(); Token = request.Headers.Authorization.Parameter;
+            Body = await request.Content.ReadAsStringAsync(); Token = request.Headers.Authorization?.Parameter;
             return new HttpResponseMessage(Status) { Content = Stall ? new StreamContent(new WaitingStream()) : new StringContent(Payload, Encoding.UTF8, "text/event-stream") };
         }
     }

@@ -1,10 +1,12 @@
 using System;
 using System.ComponentModel;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Askai;
 
 namespace Ask.ai
 {
@@ -18,20 +20,26 @@ namespace Ask.ai
         private readonly Button apply = new Button { Text = "&Mail’e aktar", AutoSize = true, Enabled = false };
         private readonly Button cancel = new Button { Text = "&İptal", AutoSize = true };
         private readonly System.Windows.Forms.Timer statusTimer;
-        private readonly TextBox preview = new TextBox
+        private readonly RichTextBox preview = new RichTextBox
         {
-            Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
+            Multiline = true, ReadOnly = true, ScrollBars = RichTextBoxScrollBars.Vertical, DetectUrls = false,
             Dock = DockStyle.Fill, BackColor = SystemColors.Window, Height = 180,
             MinimumSize = new Size(0, 150), MaxLength = 1024 * 1024, TabStop = true
         };
         private readonly object chunkLock = new object();
         private readonly StringBuilder pendingText = new StringBuilder();
+        private readonly MailPreviewBuffer previewBuffer = new MailPreviewBuffer();
+        private readonly bool applyMarkdown;
+        private readonly bool supportsRichText;
+        private bool previewFailed;
         private int receivedCharacters;
         private bool finished;
         private bool applying;
 
-        public ProgressForm(CancellationTokenSource cancellation, string title, string approvalMessage)
+        public ProgressForm(CancellationTokenSource cancellation, string title, string approvalMessage, bool applyMarkdown = false, bool supportsRichText = true)
         {
+            this.applyMarkdown = applyMarkdown;
+            this.supportsRichText = supportsRichText;
             this.cancellation = cancellation;
             components = new Container();
             Text = Askai.AiBrand.Name;
@@ -60,7 +68,8 @@ namespace Ask.ai
             layout.Controls.Add(progress, 0, 1);
             status.Text = "İstek hazırlanıyor; servisten içerik bekleniyor…";
             layout.Controls.Add(status, 0, 2);
-            action.Text = approvalMessage;
+            action.Text = approvalMessage + (applyMarkdown && !supportsRichText
+                ? "\nHedef mail düz metin biçiminde. Markdown okunabilir metne dönüştürülecek; kalın yazı ve tablo biçimlendirmesi uygulanamayacak." : "");
             layout.Controls.Add(preview, 0, 3);
             layout.Controls.Add(action, 0, 4);
             layout.Controls.Add(new Label
@@ -87,11 +96,32 @@ namespace Ask.ai
             statusTimer = new System.Windows.Forms.Timer(components) { Interval = 150 };
             statusTimer.Tick += (sender, args) =>
             {
-                FlushPreview();
+                try { FlushPreview(); }
+                catch (Exception)
+                {
+                    // WinForms timer exceptions must not escape the UI message loop.
+                    // Never allow approval after a failed preview.
+                    FailPreview();
+                    return;
+                }
                 int count = receivedCharacters;
                 if (count > 0) status.Text = "İçerik hazırlanıyor… (" + count + " karakter alındı)";
             };
             statusTimer.Start();
+            preview.SizeChanged += (sender, args) =>
+            {
+                if (!applyMarkdown || !supportsRichText || previewFailed || previewBuffer.Source.Length == 0) return;
+                try { RenderPreview(); }
+                catch (Exception) { FailPreview(); }
+            };
+        }
+
+        private void FailPreview()
+        {
+            previewFailed = true;
+            statusTimer.Stop();
+            apply.Enabled = false;
+            status.Text = "Önizleme biçimlendirilemedi. İçerik aktarılmayacak.";
         }
 
         // Transport callbacks only queue text; the UI timer batches updates on the UI thread.
@@ -111,14 +141,57 @@ namespace Ask.ai
                 pendingText.Clear();
             }
             receivedCharacters += text.Length;
-            preview.AppendText(text);
+            previewBuffer.Append(text);
+            RenderPreview();
         }
 
-        public void SetReady()
+        private void RenderPreview()
+        {
+            int selectionStart = preview.SelectionStart;
+            int selectionLength = preview.SelectionLength;
+            var scrollPosition = new Point();
+            SendMessage(preview.Handle, 0x04DD /* EM_GETSCROLLPOS */, IntPtr.Zero, ref scrollPosition);
+            Point endPosition = preview.GetPositionFromCharIndex(preview.TextLength);
+            bool followEnd = selectionStart + selectionLength >= preview.TextLength
+                && (preview.TextLength == 0 || (endPosition.Y >= 0 && endPosition.Y < preview.ClientSize.Height));
+            if (applyMarkdown)
+            {
+                int tableWidth = Math.Max(1440, (preview.ClientSize.Width - 16) * 1440 / preview.DeviceDpi);
+                var content = MailFormatting.Create(previewBuffer.Source, true, tableWidth);
+                if (supportsRichText) preview.Rtf = content.Rtf;
+                else preview.Text = MailText.ForPreview(content.PlainText);
+            }
+            else preview.Text = MailText.ForPreview(previewBuffer.Source);
+            if (followEnd)
+            {
+                preview.Select(preview.TextLength, 0);
+                preview.ScrollToCaret();
+            }
+            else
+            {
+                preview.Select(Math.Min(selectionStart, preview.TextLength), Math.Min(selectionLength, Math.Max(0, preview.TextLength - selectionStart)));
+                SendMessage(preview.Handle, 0x04DE /* EM_SETSCROLLPOS */, IntPtr.Zero, ref scrollPosition);
+            }
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr parameter, ref Point point);
+
+        public void SetReady() { SetReady(null); }
+
+        public void SetReady(string result)
         {
             if (IsDisposed || cancellation.IsCancellationRequested) return;
             statusTimer.Stop();
+            if (previewFailed) throw new MailActionException("Önizleme biçimlendirilemedi. Mail değiştirilmedi.");
             FlushPreview();
+            if (applyMarkdown) MailFormatting.Create(result ?? previewBuffer.Source, true).EnsureVisibleText();
+            // The completed provider result is authoritative, even if callbacks omitted a final fragment.
+            if (result != null)
+            {
+                previewBuffer.Replace(result);
+                RenderPreview();
+            }
             progress.Style = ProgressBarStyle.Continuous;
             progress.Value = 100;
             status.Text = "İçerik hazır. Mail’e aktarmak için onayınız bekleniyor.";

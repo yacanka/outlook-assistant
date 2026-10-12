@@ -323,4 +323,73 @@ yeniden kullanılabilir.
 `Assets/Assistant.svg` ölçeklenebilir ikon kaynağıdır. Aynı ikon PNG ve
 16–256 piksel boyutlarını içeren ICO olarak sağlanır; eklenti assembly'sine
 gömülür, Ayarlar düğmesinde ve pencerelerin başlık çubuğunda kullanılır.
-Yeni bir çalışma zamanı bağımlılığı eklenmemiştir.
+İkonlar ek bir çalışma zamanı bağımlılığı gerektirmez.
+
+## Markdown ve mail biçimlendirme
+
+**Ayarlar → Mail biçimlendirme → Markdown uygula** seçeneği ilk kurulumda
+kapalıdır. Eski ayar dosyalarında da kapalı kabul edilir. Seçim XML içindeki
+`ApplyMarkdown` alanında saklanır ve her AI işleminin başında alınır;
+PLUS AI ve TAB 3.2 için aynı şekilde çalışır.
+
+Açıkken AI’dan Markdown mail gövdesi istenir. Önizleme ve Outlook aktarımı
+ortak dönüştürücü kullanır: başlıklar, kalın/italik/üstü çizili yazı, iç içe
+numaralı ve madde listeleri, alıntılar, bağlantılar, kod ve pipe tablolar
+desteklenir. Normal satır sonları da korunur. Ham HTML metin olarak kalır;
+görseller yüklenmeden alternatif metinleri gösterilir. Yalnız HTTP, HTTPS
+ve mailto bağlantıları etkin bağlantı olarak aktarılır.
+
+Yeni Markdown mailleri HTML oluşturulur. Mevcut düz metin mailin biçimi
+değiştirilmez; önizlemede bu sınırlama belirtilir ve Markdown işaretleri
+çıkarılmış okunabilir metin aktarılır. Tablolar bu durumda sekmeyle ayrılmış
+sütunlar ve ayrı satırlar halinde korunur. HTML/RTF maillerde üretilen RTF,
+Word editörünün yalnız hedef aralığına dosyadan eklenir. Pano kullanılmaz;
+geçici RTF aktarım sonunda silinir. İmza ve önceki yazışmalar korunur,
+uygulama mail göndermez.
+
+Markdig **1.4.0**, .NET Framework 4.7.2 ile uyumlu Markdown ayrıştırıcısıdır
+(BSD-2-Clause: https://github.com/xoofx/markdig/blob/main/license.txt).
+İç içe işaretleme, kaçışlar ve tabloları güvenilir ayrıştırmak için eklenmiştir;
+standart kütüphanede Markdown ayrıştırıcısı bulunmaz. Elle regex yaklaşımı
+bu kapsamda uyum ve bakım riskini artırır. Paket ve framework bağımlılıkları
+NuGet restore ile gelir; kurulum çıktısına ek assembly’ler dahil olur.
+Yeni bir ağ servisi veya arka plan işlemi eklenmez. Paket sürümü sabittir;
+güncellemeler mevcut dönüşüm testleriyle doğrulanmalıdır.
+
+Sertifika kontrollerinden bağımsız ilgili testler:
+
+```sh
+dotnet run --project tests/TransportTests.csproj -- --mail-only
+```
+
+Windows’ta ayrıca Markdown açık/kapalı olarak yeni mail, seçili metni
+İyileştir, Yanıtla ve Tümünü Yanıtla işlemlerini HTML/RTF/düz metin hedeflerde
+kontrol edin. İmza ve seçim dışındaki biçimleri, paragraf ortası seçimleri,
+iç içe listelerin sırasını, tablo hücrelerini ve uzun akış sırasında
+önizlemeyi kaydırmayı doğrulayın. RTF import ve gerçek Outlook görünümü
+simülasyon testleriyle kanıtlanamaz.
+
+## Kişisel hafıza
+
+**Ayarlar → Hafıza** sekmesinde rolünüzü, üslubunuzu ve yazım tercihlerinizi
+tek bir metin alanında tanımlayın. Örneğin: “Proje koordinatörüyüm. Kısa ve
+nazik yaz. Teknik terimleri sade bir dille açıkla.” Sınır 4.000 karakterdir;
+uzun metin sessizce kırpılmaz, kaydetmeden önce kısaltmanız istenir.
+
+**Hafızayı kullan** varsayılan açıktır. Boş hafıza üretimi etkilemez. Kapatmak
+metni korur; **Temizle** alanı boşaltır. Bu değişiklikler yalnızca **Kaydet** ile
+kalıcılaşır; Vazgeç veya pencereyi kapatmak kaydetmez. Sonraki mail işleminde
+kaydedilmiş bilgiler kullanılır; Outlook'u yeniden başlatmanız gerekmez.
+Devam eden üretim başlangıçta yüklediği ayarları kullanır.
+
+Hafıza yeni mail, yanıt, tümünü yanıtla ve seçili metni iyileştirmede PLUS AI
+ve TAB 3.2'ye kişisel bağlam olarak iletilir. Etkinken metnin tamamı her
+üretimde seçili AI servisine gönderilir. Mevcut sistem/görev kuralları korunur;
+işleme özel talimatlar hafızadaki genel tercihlerden önceliklidir. Hafıza imza,
+gönderen kimliği, bilinmeyen olgu veya taahhüt üretme yetkisi vermez.
+
+Metin mevcut `settings.xml` içinde Windows DPAPI CurrentUser ile şifrelenir.
+Aynı Windows kullanıcısının tüm Outlook hesaplarında geçerlidir; cihazlar
+arasında eşitlenmez ve maillerden otomatik öğrenme yapılmaz. Eski ayar
+kayıtları boş hafızayla yüklenir. Şifreli kayıt okunamazsa mevcut güvenli ayar
+hata mesajı gösterilir; ham hafıza hata mesajına veya loga yazılmaz.

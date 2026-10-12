@@ -14,6 +14,10 @@ namespace Askai
         public string Model { get; set; } = "";
         public string Token { get; set; } = "";
         public bool UseTls12 { get; set; }
+        public bool ApplyMarkdown { get; set; }
+        /// <summary>Personal context, encrypted for the current Windows user when saved.</summary>
+        public string MemoryText { get; set; } = "";
+        public bool MemoryEnabled { get; set; } = true;
         public string CentralServerCertificate { get; set; } = "";
         public string CentralCaCertificates { get; set; } = "";
         public string CentralBundleCertificates { get; set; } = "";
@@ -24,20 +28,29 @@ namespace Askai
         private static string SettingsPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Askai", "settings.xml");
 
-        public static AiSettings Load()
+        public static AiSettings Load() { return Load(SettingsPath); }
+
+        internal static AiSettings Load(string path)
         {
-            if (!File.Exists(SettingsPath)) return new AiSettings();
+            if (!File.Exists(path)) return new AiSettings();
             try
             {
-                var root = XElement.Load(SettingsPath);
+                var root = XElement.Load(path);
                 AiProvider provider;
                 if (!Enum.TryParse((string)root.Element("Provider"), out provider)
                     || !Enum.IsDefined(typeof(AiProvider), provider)) throw new FormatException();
                 string encrypted = (string)root.Element("Token") ?? "";
+                string encryptedMemory = (string)root.Element("MemoryText") ?? "";
+                string memory = encryptedMemory.Length == 0 ? "" : Encoding.UTF8.GetString(ProtectedData.Unprotect(
+                    Convert.FromBase64String(encryptedMemory), null, DataProtectionScope.CurrentUser));
+                if (memory.Length > AppConfig.MemoryMaxLength) throw new FormatException();
                 return new AiSettings {
                     Provider = provider,
                     Model = (string)root.Element("Model") ?? "",
                     UseTls12 = (bool?)root.Element("UseTls12") ?? false,
+                    ApplyMarkdown = (bool?)root.Element("ApplyMarkdown") ?? false,
+                    MemoryEnabled = (bool?)root.Element("MemoryEnabled") ?? true,
+                    MemoryText = memory,
                     CentralServerCertificate = (string)root.Element("CentralServerCertificate") ?? "",
                     CentralCaCertificates = (string)root.Element("CentralCaCertificates") ?? "",
                     CentralBundleCertificates = (string)root.Element("CentralBundleCertificates") ?? "",
@@ -53,24 +66,33 @@ namespace Askai
             }
         }
 
-        public void Save()
+        public void Save() { Save(SettingsPath); }
+
+        internal void Save(string path)
         {
+            if ((MemoryText ?? "").Length > AppConfig.MemoryMaxLength)
+                throw new ArgumentException("Hafıza en fazla 4.000 karakter olabilir. Metni kısaltıp yeniden kaydedin.", nameof(MemoryText));
+            string encryptedMemory = string.IsNullOrEmpty(MemoryText) ? "" : Convert.ToBase64String(
+                ProtectedData.Protect(Encoding.UTF8.GetBytes(MemoryText), null, DataProtectionScope.CurrentUser));
             string encrypted = string.IsNullOrEmpty(Token) ? "" : Convert.ToBase64String(
                 ProtectedData.Protect(Encoding.UTF8.GetBytes(Token), null, DataProtectionScope.CurrentUser));
             var root = new XElement("AiSettings", new XElement("Provider", Provider),
                 new XElement("Model", Model), new XElement("Token", encrypted),
                 new XElement("UseTls12", UseTls12),
+                new XElement("ApplyMarkdown", ApplyMarkdown),
+                new XElement("MemoryEnabled", MemoryEnabled),
+                new XElement("MemoryText", encryptedMemory),
                 new XElement("CentralServerCertificate", CentralServerCertificate),
                 new XElement("CentralCaCertificates", CentralCaCertificates),
                 new XElement("CentralBundleCertificates", CentralBundleCertificates),
                 new XElement("CentralCertificateTrustMode", CentralCertificateTrustMode));
-            Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath));
-            string temporary = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 root.Save(temporary);
-                if (File.Exists(SettingsPath)) File.Replace(temporary, SettingsPath, null);
-                else File.Move(temporary, SettingsPath);
+                if (File.Exists(path)) File.Replace(temporary, path, null);
+                else File.Move(temporary, path);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }

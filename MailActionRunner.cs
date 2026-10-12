@@ -21,9 +21,11 @@ namespace Ask.ai
             {
                 using (var target = OutlookMailTarget.Capture(Globals.ThisAddIn.Application, windowContext, capability))
                 {
+                    var settings = AiSettings.Load();
+                    target.ApplyMarkdown = settings.ApplyMarkdown;
                     var request = ReadRequest(capability, target);
                     if (request == null) return;
-                    await PrepareAndApplyAsync(request, target);
+                    await PrepareAndApplyAsync(request, target, settings);
                 }
             }
             catch (MailActionException ex) { ShowError(ex.Message); }
@@ -40,30 +42,30 @@ namespace Ask.ai
         private static MailGenerationRequest ReadRequest(MailCapability capability, OutlookMailTarget target)
         {
             if (capability == MailCapability.Improve)
-                return new MailGenerationRequest(capability, target.Subject, target.Source, "");
+                return new MailGenerationRequest(capability, target.Subject, target.Source, "", target.ApplyMarkdown);
             bool composing = capability == MailCapability.Compose;
             using (var input = new MailInputForm(composing, capability == MailCapability.ReplyAll, target.Subject))
             {
                 if (input.ShowDialog() != DialogResult.OK) return null;
                 if (composing) target.SetNewSubject(input.MailSubject);
-                return new MailGenerationRequest(capability, target.Subject, target.Source, input.Instructions);
+                return new MailGenerationRequest(capability, target.Subject, target.Source, input.Instructions, target.ApplyMarkdown);
             }
         }
 
-        private static async Task PrepareAndApplyAsync(MailGenerationRequest request, IAiDraftTarget target)
+        private static async Task PrepareAndApplyAsync(MailGenerationRequest request, OutlookMailTarget target, AiSettings settings)
         {
-            string prompt = request.BuildPrompt();
+            string prompt = request.BuildPrompt(settings.MemoryEnabled ? settings.MemoryText : null);
             var session = new MailGenerationSession();
             using (var cancellation = new CancellationTokenSource())
-            using (var progress = new ProgressForm(cancellation, GetTitle(request.Capability), GetApprovalMessage(request.Capability)))
+            using (var progress = new ProgressForm(cancellation, GetTitle(request.Capability), GetApprovalMessage(request.Capability), request.ApplyMarkdown, target.SupportsRichText))
             {
                 progress.Show();
                 try
                 {
-                    string result = await new AiService().SendStreamingRequestAsync(prompt, progress.ReportChunk, cancellation.Token);
+                    string result = await new AiService().SendStreamingRequestAsync(prompt, progress.ReportChunk, cancellation.Token, settings);
                     cancellation.Token.ThrowIfCancellationRequested();
                     if (!session.Complete(result)) return;
-                    progress.SetReady();
+                    progress.SetReady(result);
                     if (!await progress.WaitForApprovalAsync()) { session.Cancel(); return; }
                     cancellation.Token.ThrowIfCancellationRequested();
                     session.ApplyApproved(target);

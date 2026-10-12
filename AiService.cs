@@ -9,7 +9,12 @@ namespace Askai
         public Task<string> SendStreamingRequestAsync(string userPrompt, Action<string> onChunk,
             CancellationToken cancellationToken)
         {
-            var settings = AiSettings.Load();
+            return SendStreamingRequestAsync(userPrompt, onChunk, cancellationToken, AiSettings.Load());
+        }
+
+        internal Task<string> SendStreamingRequestAsync(string userPrompt, Action<string> onChunk,
+            CancellationToken cancellationToken, AiSettings settings)
+        {
             if (settings.Provider == AiProvider.Legacy)
                 return new LegacyAiService(AiHttpTransport.GetClient(settings.UseTls12, forLegacy: true))
                     .SendStreamingRequestAsync(userPrompt, onChunk, cancellationToken);

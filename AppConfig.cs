@@ -19,6 +19,8 @@
         // Model adı
         public static string Model = "TAB 3.2";
 
+        public const int MemoryMaxLength = 4000;
+
         // Sistem promptu - AI'ın nasıl yanıt vereceğini belirler
         public static string SystemPrompt =
             "Sen profesyonel bir e-posta asistanısın. " +

@@ -104,6 +104,12 @@ namespace OfficeSimulation
     public sealed class Counted { public int Count { get; set; } }
     public sealed class Document
     {
+        public string LastInsertedRtf;
+        public string LastInsertPath;
+        public int LastInsertStart;
+        public int LastInsertEnd;
+        public ParagraphFormat ParagraphFormat { get; set; } = new ParagraphFormat();
+        public ListFormat ListFormat { get; } = new ListFormat();
         private readonly Func<bool> failInsert;
         public Document(Func<bool> failInsert)
         {
@@ -145,6 +151,30 @@ namespace OfficeSimulation
         public Range Range => document.Unsupported == "empty" ? document.Range(0, 0) : Selected;
     }
     public sealed class Shape { public Range Anchor { get; set; } }
+    public sealed class ParagraphFormat
+    {
+        public float LeftIndent { get; set; }
+        public ParagraphFormat Duplicate => new ParagraphFormat { LeftIndent = LeftIndent };
+    }
+    public sealed class ListFormat
+    {
+        public int ListType { get; set; }
+        public object ListTemplate { get; } = new object();
+        public int ListLevelNumber { get; set; } = 1;
+        public int LastApplyTo;
+        public void RemoveNumbers() { ListType = 0; }
+        public void ApplyListTemplateWithLevel(object template, bool continuePrevious, int applyTo, int behavior, int level)
+        {
+            if (!ReferenceEquals(template, ListTemplate) || applyTo != 2) throw new Exception("Must restore original template only to selected paragraph");
+            LastApplyTo = applyTo;
+            ListType = 1;
+            ListLevelNumber = level;
+        }
+    }
+    public sealed class Paragraph
+    {
+        public Range Range { get; set; }
+    }
     public sealed class Range
     {
         private readonly Document document;
@@ -162,6 +192,32 @@ namespace OfficeSimulation
         public Counted ContentControls => new Counted { Count = document.Unsupported == "control" ? 1 : 0 };
         public Dictionary<int, bool> Information => new Dictionary<int, bool> { [12] = document.Unsupported == "table" };
         public bool InRange(Range other) { return Start >= other.Start && End <= other.End; }
+        public Items<Paragraph> Paragraphs
+        {
+            get
+            {
+                int start = Start == 0 ? 0 : document.Text.LastIndexOf('\r', Start - 1) + 1;
+                int end = document.Text.IndexOf('\r', Start);
+                var paragraphs = new Items<Paragraph>();
+                paragraphs.Values.Add(new Paragraph { Range = document.Range(start, end < 0 ? document.Text.Length : end + 1) });
+                return paragraphs;
+            }
+        }
+        public ParagraphFormat ParagraphFormat { get => document.ParagraphFormat; set => document.ParagraphFormat = value.Duplicate; }
+        public ListFormat ListFormat => document.ListFormat;
+        public void InsertFile(string path, object range, bool confirmConversions, bool link, bool attachment)
+        {
+            if (confirmConversions || link || attachment) throw new Exception("Unsafe RTF import options");
+            document.LastInsertedRtf = System.IO.File.ReadAllText(path);
+            document.LastInsertPath = path;
+            document.LastInsertStart = Start;
+            document.LastInsertEnd = End;
+            // Record the real adapter's COM arguments. This deliberately does not emulate RTF layout.
+            Text = "[Imported rich content]";
+            // Import may change shared paragraph properties, even when its text range is narrow.
+            document.ParagraphFormat.LeftIndent = 0;
+            document.ListFormat.ListType = 0;
+        }
         public string Text
         {
             get => document.Text.Substring(Start, End - Start);
