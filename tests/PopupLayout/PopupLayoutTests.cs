@@ -1,14 +1,21 @@
 using System;
 using System.Drawing;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Ask.ai;
 
 internal static class PopupLayoutTests
 {
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        CheckSettingsSelection();
+        if (args.Length == 1 && args[0] == "--settings-only")
+        {
+            Console.WriteLine("Settings selection checks passed.");
+            return;
+        }
         Application.EnableVisualStyles();
         using (var input = new MailInputForm(false, true, "Örnek konu"))
         {
@@ -21,7 +28,17 @@ internal static class PopupLayoutTests
             "Onayınızla Outlook’un tümünü yanıtla taslağı açılacak. Göndermeden önce alıcıları ve metni kontrol edin."))
         {
             CheckSizes(progress);
+            Control.CheckForIllegalCrossThreadCalls = true;
+            Task.Run(() => progress.ReportChunk("İlk parça")).GetAwaiter().GetResult();
+            var preview = FindPreview(progress);
+            Check(preview != null && preview.ReadOnly, "Generated text must have a read-only preview.");
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (preview.Text.Length == 0 && DateTime.UtcNow < deadline) Application.DoEvents();
+            Check(preview.Text == "İlk parça", "Chunks become visible while generation is still running.");
+            Check(!FindButton(progress, "&Mail’e aktar").Enabled, "Preview does not approve partial text.");
+            Task.Run(() => progress.ReportChunk(" ve son parça")).GetAwaiter().GetResult();
             progress.SetReady();
+            Check(preview.Text == "İlk parça ve son parça", "Ready flushes the last chunk without losing or duplicating text.");
             CheckContent(progress);
             progress.Scale(new SizeF(1.5f, 1.5f));
             CheckSizes(progress);
@@ -36,6 +53,28 @@ internal static class PopupLayoutTests
         }
         CheckSettingsColumns();
         Console.WriteLine("All popup layout checks passed.");
+    }
+
+    private static void CheckSettingsSelection()
+    {
+        var settings = new Askai.AiSettings
+        {
+            CentralServerCertificate = "server-fixture",
+            CentralCaCertificates = "ca-fixture",
+            CentralBundleCertificates = "bundle-fixture"
+        };
+        Check(settings.CentralCertificateTrustMode == Askai.CertificateTrustMode.ServerCertificate,
+            "Existing defaults must not silently select the no-revocation mode.");
+        Check(settings.ActiveCentralCertificate == "server-fixture", "Server mode selects its own data.");
+        settings.CentralCertificateTrustMode = Askai.CertificateTrustMode.CertificateBundle;
+        Check(settings.ActiveCentralCertificate == "bundle-fixture", "Bundle mode selects its own data.");
+        settings.CentralCertificateTrustMode = Askai.CertificateTrustMode.CertificateAuthority;
+        Check(settings.ActiveCentralCertificate == "ca-fixture", "CA mode selects its own data.");
+        settings.CentralCertificateTrustMode = Askai.CertificateTrustMode.CertificateBundle;
+        Check(settings.ActiveCentralCertificate == "bundle-fixture", "Switching modes preserves the bundle.");
+        settings.CentralBundleCertificates = "";
+        Check(settings.ActiveCentralCertificate == "" && settings.CentralServerCertificate == "server-fixture"
+            && settings.CentralCaCertificates == "ca-fixture", "Clearing the bundle leaves other trust modes intact.");
     }
 
     private static void CheckSettingsColumns()
@@ -101,6 +140,18 @@ internal static class PopupLayoutTests
         var scrollable = parent as ScrollableControl;
         if (scrollable != null)
             Check(!scrollable.HorizontalScroll.Visible, "Popup must not require horizontal scrolling.");
+    }
+
+    private static TextBox FindPreview(Control parent)
+    {
+        foreach (Control control in parent.Controls)
+        {
+            var preview = control as TextBox;
+            if (preview != null && preview.Multiline) return preview;
+            var found = FindPreview(control);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     private static Button FindButton(Control parent, string text)

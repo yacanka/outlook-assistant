@@ -16,9 +16,11 @@ namespace Askai
         public bool UseTls12 { get; set; }
         public string CentralServerCertificate { get; set; } = "";
         public string CentralCaCertificates { get; set; } = "";
+        public string CentralBundleCertificates { get; set; } = "";
         public CertificateTrustMode CentralCertificateTrustMode { get; set; } = CertificateTrustMode.ServerCertificate;
-        public string ActiveCentralCertificate => CentralCertificateTrustMode == CertificateTrustMode.CertificateAuthority
-            ? CentralCaCertificates : CentralServerCertificate;
+        public string ActiveCentralCertificate => CentralCertificateTrustMode == CertificateTrustMode.CertificateBundle
+            ? CentralBundleCertificates : CentralCertificateTrustMode == CertificateTrustMode.CertificateAuthority
+                ? CentralCaCertificates : CentralServerCertificate;
         private static string SettingsPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Askai", "settings.xml");
 
@@ -38,6 +40,7 @@ namespace Askai
                     UseTls12 = (bool?)root.Element("UseTls12") ?? false,
                     CentralServerCertificate = (string)root.Element("CentralServerCertificate") ?? "",
                     CentralCaCertificates = (string)root.Element("CentralCaCertificates") ?? "",
+                    CentralBundleCertificates = (string)root.Element("CentralBundleCertificates") ?? "",
                     CentralCertificateTrustMode = ServerCertificateTrust.ParseMode((string)root.Element("CentralCertificateTrustMode")),
                     Token = encrypted.Length == 0 ? "" : Encoding.UTF8.GetString(ProtectedData.Unprotect(
                         Convert.FromBase64String(encrypted), null, DataProtectionScope.CurrentUser))
@@ -59,6 +62,7 @@ namespace Askai
                 new XElement("UseTls12", UseTls12),
                 new XElement("CentralServerCertificate", CentralServerCertificate),
                 new XElement("CentralCaCertificates", CentralCaCertificates),
+                new XElement("CentralBundleCertificates", CentralBundleCertificates),
                 new XElement("CentralCertificateTrustMode", CentralCertificateTrustMode));
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath));
             string temporary = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";

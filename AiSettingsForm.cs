@@ -20,10 +20,13 @@ namespace Askai
         private readonly Button clearCertificate = new Button { Text = "Temizle", AutoSize = true };
         private string centralServerCertificate = "";
         private string centralCaCertificates = "";
-        private CertificateTrustMode CurrentCertificateMode => certificateMode.SelectedIndex == 1
-            ? CertificateTrustMode.CertificateAuthority : CertificateTrustMode.ServerCertificate;
-        private string CurrentCertificateData => CurrentCertificateMode == CertificateTrustMode.CertificateAuthority
-            ? centralCaCertificates : centralServerCertificate;
+        private string centralBundleCertificates = "";
+        private CertificateTrustMode CurrentCertificateMode => certificateMode.SelectedIndex == 2
+            ? CertificateTrustMode.CertificateBundle : certificateMode.SelectedIndex == 1
+                ? CertificateTrustMode.CertificateAuthority : CertificateTrustMode.ServerCertificate;
+        private string CurrentCertificateData => CurrentCertificateMode == CertificateTrustMode.CertificateBundle
+            ? centralBundleCertificates : CurrentCertificateMode == CertificateTrustMode.CertificateAuthority
+                ? centralCaCertificates : centralServerCertificate;
 
         public AiSettingsForm()
         {
@@ -55,7 +58,7 @@ namespace Askai
                 AutoSize = true, Dock = DockStyle.Fill
             }, 1, 5);
             layout.Controls.Add(new Label { Text = "Central sertifika modu", AutoSize = true, Dock = DockStyle.Fill }, 0, 6);
-            certificateMode.Items.AddRange(new object[] { "Sunucu + ara/kök zinciri", "CA zincirine güven" });
+            certificateMode.Items.AddRange(new object[] { "Sunucu + ara/kök zinciri", "CA zincirine güven", "Sertifika paketi (CRL/OCSP kapalı)" });
             layout.Controls.Add(certificateMode, 1, 6);
             layout.Controls.Add(certificateInfo, 1, 7);
             var certificateButtons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill };
@@ -87,7 +90,8 @@ namespace Askai
             tls12.Checked = settings.UseTls12;
             centralServerCertificate = settings.CentralServerCertificate;
             centralCaCertificates = settings.CentralCaCertificates;
-            certificateMode.SelectedIndex = settings.CentralCertificateTrustMode == CertificateTrustMode.CertificateAuthority ? 1 : 0;
+            centralBundleCertificates = settings.CentralBundleCertificates;
+            certificateMode.SelectedIndex = (int)settings.CentralCertificateTrustMode;
             certificateMode.SelectedIndexChanged += (sender, args) => UpdateCertificateInfo();
             UpdateCertificateInfo();
             provider.SelectedIndexChanged += (s, e) => UpdateEnabled();
@@ -109,7 +113,9 @@ namespace Askai
         {
             using (var picker = new OpenFileDialog
             {
-                Title = CurrentCertificateMode == CertificateTrustMode.CertificateAuthority
+                Title = CurrentCertificateMode == CertificateTrustMode.CertificateBundle
+                    ? "Kök, ara ve isteğe bağlı sunucu sertifikası paketini seçin"
+                    : CurrentCertificateMode == CertificateTrustMode.CertificateAuthority
                     ? "CA kök ve ara sertifikalarını seçin" : "Sunucu ve ara/kök sertifikalarını seçin",
                 Filter = "Sertifikalar (*.cer;*.crt)|*.cer;*.crt",
                 CheckFileExists = true, Multiselect = true
@@ -131,7 +137,9 @@ namespace Askai
 
         private void UpdateCertificateInfo()
         {
-            certificateHelp.Text = CurrentCertificateMode == CertificateTrustMode.CertificateAuthority
+            certificateHelp.Text = CurrentCertificateMode == CertificateTrustMode.CertificateBundle
+                ? "Python requests verify kullanımına benzer: kök + ara + sunucu paketi yüklenebilir. Adres, imza, süre ve kök zinciri doğrulanır; sunucu sertifikası sabitlenmez. CRL/OCSP kontrolü yapılmaz; iptal edilmiş sertifikalar tespit edilemeyebilir."
+                : CurrentCertificateMode == CertificateTrustMode.CertificateAuthority
                 ? "CA modu aynı köke uzanan yeni sunucu sertifikalarını da kabul eder. Yalnızca CA kök/ara .cer/.crt dosyaları seçin. Adres, süre ve iptal kontrolü korunur."
                 : "Tek sunucu sertifikası veya sunucu + ara/kök .cer/.crt zinciri seçin. Sunucu sertifikasına birebir eşleşme korunur. Windows sertifika deposu değişmez.";
             if (string.IsNullOrEmpty(CurrentCertificateData))
@@ -145,7 +153,8 @@ namespace Askai
 
         private void SetCurrentCertificateData(string data)
         {
-            if (CurrentCertificateMode == CertificateTrustMode.CertificateAuthority) centralCaCertificates = data;
+            if (CurrentCertificateMode == CertificateTrustMode.CertificateBundle) centralBundleCertificates = data;
+            else if (CurrentCertificateMode == CertificateTrustMode.CertificateAuthority) centralCaCertificates = data;
             else centralServerCertificate = data;
         }
 
@@ -158,7 +167,8 @@ namespace Askai
                 new AiSettings { Provider = (AiProvider)provider.SelectedItem,
                     Model = model.SelectedItem as string ?? "", Token = token.Text.Trim(),
                     UseTls12 = tls12.Checked, CentralServerCertificate = centralServerCertificate,
-                    CentralCaCertificates = centralCaCertificates, CentralCertificateTrustMode = CurrentCertificateMode }.Save();
+                    CentralCaCertificates = centralCaCertificates, CentralBundleCertificates = centralBundleCertificates,
+                    CentralCertificateTrustMode = CurrentCertificateMode }.Save();
                 DialogResult = DialogResult.OK;
                 Close();
             }

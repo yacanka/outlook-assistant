@@ -18,7 +18,7 @@ uyarı verip yeniden kaydetmeye izin verir. Central token Legacy'ye gönderilmez
 Legacy mevcut `ApiUrl`, `ApiKey` ve istek formatını kullanır.
 
 Central `model`, `messages`, `stream: true` gönderir ve OpenAI uyumlu SSE
-`choices[].delta.content` parçalarını bellekte biriktirir; popup yalnızca ilerlemeyi gösterir. Servis SSE ve
+`choices[].delta.content` parçalarını bellekte biriktirir; popup metni parçalar geldikçe salt okunur önizlemede gösterir. Servis SSE ve
 `[DONE]` bitiş işaretini desteklemelidir; AW Center'ın non-streaming kullanımı
 tek başına bu desteği kanıtlamaz. Otomatik retry/fallback/redirect yapılmaz.
 İstek ve toplam akış sınırı 1 MiB; toplam süre `TimeoutMinutes` ile sınırlıdır.
@@ -87,7 +87,7 @@ test ortamında doğrulanmaz.
 
 ### Manuel Central sertifika güveni
 
-**AI Ayarları → Central sertifika modu → Sertifika seç… → Kaydet** üzerinden iki
+**AI Ayarları → Central sertifika modu → Sertifika seç… → Kaydet** üzerinden üç
 ayrı mod kullanılabilir:
 
 - **CA zincirine güven:** Yalnızca kök ve isteğe bağlı ara CA sertifikaları seçilir.
@@ -98,6 +98,23 @@ ayrı mod kullanılabilir:
   sunduğu sertifikanın tamamı yüklenen sunucu sertifikasıyla birebir eşleşmelidir.
   Sunucu sertifikası yenilenince bu modda yeniden seçilmelidir. Önceki sürümdeki
   tek sunucu sertifikası seçimi de desteklenmeye devam eder.
+- **Sertifika paketi (CRL/OCSP kapalı):** Python `requests` içinde `verify`
+  dosyası kullanmaya benzer bir güven modu. Tek dosyada kök, ara ve sunucu
+  sertifikaları birlikte bulunabilir; yalnızca kök/ara CA paketi de kabul edilir.
+  Tek bir güvenilen köke ulaşan zincir, imza, kullanım amacı, süre ve sunucu
+  adresi doğrulanır. Paketteki sunucu sertifikası birebir sabitlenmez; aynı kökten
+  verilen yeni bir sunucu sertifikası kabul edilebilir. Paketteki eski sunucu
+  sertifikasının süresinin dolması bunu engellemez; süre ve imza kontrolü
+  bağlantıda sunulan gerçek sunucu sertifikasına uygulanır. Çevrimiçi CRL/OCSP kontrolü
+  yapılmaz; iptal edilmiş, süresi dolmamış sertifikalar tespit edilemeyebilir.
+  Bu mod yalnızca kullanıcı seçtiğinde uygulanır; eski modlar ve varsayılanlar
+  değişmez. Windows/OpenSSL zincir oluşturma farklılıkları nedeniyle Python ile
+  her ortamda birebir aynı sonucu vereceği garanti edilmez.
+
+Python'da çalışan kök + ara + sunucu paketinizi kullanmak için **AI Ayarları →
+Central sertifika modu → Sertifika paketi (CRL/OCSP kapalı) → Sertifika seç… →
+Kaydet** adımlarını izleyin. PEM içerikli `.cer/.crt` dosyasını seçin. Paket bu
+moda özel saklanır; diğer modlarda daha önce yüklenen dosyalar otomatik taşınmaz.
 
 Dosya seçicisinde birden fazla `.cer/.crt` dosyası seçilebilir. DER veya birden
 fazla CERTIFICATE bloğu içeren PEM verisi desteklenir; PEM'de UTF-8 BOM kabul
@@ -107,7 +124,9 @@ toplam 256 KiB dosya ve tek sertifika için 64 KiB sınırı vardır. Yinelenen
 sertifikalar birleştirilir; dosya sırası sonucu değiştirmez.
 
 Yeni zincir seçimlerinde tek bir kök gerekir. Eksik kök, ilgisiz sertifikalar,
-farklı kökler ve geçersiz imzalar reddedilir. CA modunda sunucu sertifikası
+farklı kökler ve geçersiz CA imzaları reddedilir. Paket modunda güven kaynağı
+yalnızca CA sertifikalarıdır; dosyadaki sunucu sertifikaları güven kaynağı olarak
+kullanılmaz. CA modunda sunucu sertifikası
 seçilmez. Sunucu zinciri modunda tam olarak bir sunucu sertifikası gerekir.
 CA zinciri seçiminde yalnızca kök de yüklenebilir; bağlantıda ara sertifikalar
 sunucudan veya Windows zincir oluşturucusundan tamamlanabilir. Oluşan zincir
@@ -127,14 +146,28 @@ Seçim sırasında zincirin yapısı ve imzaları iptal servisine ihtiyaç olmad
 kontrol edilir. Native zincir oluşturucusu AIA sorgusu yapabilir; erişilemeyen
 AIA adresleri seçim sırasında beklemeye neden olabilir. Yükleme sırasında
 oluşan yolun bütün elemanları seçilen dosyalarda bulunmalıdır. Canlı bağlantıda
-yeni zincir modları `Online` iptal kontrolüyle
+sunucu ve CA zinciri modları `Online` iptal kontrolüyle
 zinciri yeniden oluşturur. Yalnızca seçilen kökün Windows tarafından tanınmaması
 (`UntrustedRoot`) karşılanır; `PartialChain` kabul edilmez. Eski tek sunucu
 sertifikası modunda birebir eşleşme koşuluyla önceki `UntrustedRoot` / `PartialChain`
-davranışı korunur. Manuel güvende HTTP istemcisinin iptal kontrolü de açıktır.
-Adres uyuşmazlığı, süre, EKU/key usage, imza, iptal, belirsiz/çevrimdışı iptal
+davranışı korunur. Bu iki modda HTTP istemcisinin iptal kontrolü de açıktır;
+paket modunda hem HTTP istemcisi hem zincir oluşturucu çevrimiçi iptal
+kontrolü yapmaz.
+Sunucu ve CA modlarında adres uyuşmazlığı, süre, EKU/key usage, imza, iptal, belirsiz/çevrimdışı iptal
 kontrolü ve diğer zincir hataları bağlantıyı reddeder. CRL/OCSP erişimi başarısızsa
 BT/servis yöneticisiyle iptal kontrolü altyapısını doğrulayın.
+
+Tek bir CA sertifikasını sunucu modunda seçmek artık yükleme sırasında açık
+bir hata verir: **CA zincirine güven** moduna geçip CA dosyalarını yeniden seçin.
+Bu kontrol eski kayıtlara da uygulanır; CA sertifikası sunucunun uç sertifikası
+olarak karşılaştırılmaz. Gerçek sunucu sertifikasını seçtiyseniz sunucu modunda kalın.
+
+Manuel doğrulama bağlantıyı reddettiğinde genel TLS mesajı yerine adres
+uyuşmazlığı, yüklenen sunucu sertifikasının farklı olması, eksik/farklı kök
+zinciri veya CRL/OCSP doğrulama hatası gösterilir. Tanı yalnızca ilgili istekte
+tutulur; paylaşılan bağlantı havuzunda başka isteklerin hatasıyla karışmaz.
+Sertifika callback'ine ulaşmadan oluşan protokol/cipher hatalarında mevcut TLS
+mesajı ve varsa Windows hata kodu gösterilmeye devam eder.
 
 Windows sertifika deposu, registry, kurumsal proxy ve Outlook'un genel TLS
 ayarları değiştirilmez. TLS 1.2 uyumluluk modu ayrı seçenektir; sertifika seçimi
@@ -145,7 +178,8 @@ manuel güven/TLS havuzu oluşturulur; limitte yeniden başlatma gerektiği bild
 
 Testler üretilmiş açık sertifikalarla CA/sunucu modlarını, yenilenmeyi, kök/imza
 kontrollerini, adres bayraklarını, DER/çoklu PEM okumayı, dosya sınırlarını,
-ayar uyumluluğunu ve havuz ayrımını doğrular. Pozitif zincir testleri çevrimdışı
+ayar uyumluluğunu ve havuz ayrımını doğrular. Paket modu testleri gerçek
+doğrulama callback’ini çalıştırır; diğer pozitif zincir testleri çevrimdışı
 yapı doğrulamasıdır; canlı iptal kontrolünün yerine geçmez. macOS sandbox'ında
 native SecTrust API'si kullanılamadığı için sertifika testleri normal macOS
 erişimiyle çalıştırılır; güven deposuna sertifika eklenmez. Windows'ta gerçek
@@ -170,7 +204,7 @@ ayrıca doğrulanmalıdır.
   ilişkisi Outlook tarafından belirlenir. Kaynak mail değiştirilmez.
 
 Üç yetenekte de popup hazırlık durumunu ve **Mail’e aktar / Vazgeç** seçeneklerini
-gösterir; üretilen mail içeriğini göstermez. İçerik tamamen hazır olmadan aktarım
+gösterir; üretilen metin akış sırasında salt okunur önizlemede görüntülenir. İçerik tamamen hazır olmadan aktarım
 düğmesi etkinleşmez. **Mail’e aktar** açık aktarım onayıdır; gönderim onayı değildir.
 Uygulama hiçbir zaman mail göndermez. Aktarılan metni Outlook editöründe inceleyip
 düzenleyin; gönderimi yalnızca Outlook üzerinden kendiniz yapın. İmza ve önceki
@@ -190,17 +224,19 @@ gönderilir; uygulama bunları dosyaya veya loga yazmaz.
 
 ### Legacy tamamlanma sözleşmesi
 
-Legacy istek alanları korunur. SSE yanıtı `[DONE]`, NDJSON yanıtı `done: true`
-ile tamamlanmalıdır. `application/json` yanıtı tek ve tamamlanmış bir JSON
-belgesi olmalıdır; `response`, `text`, `content`, `output`, `message.content`
-ve `choices[].message.content` desteklenir. Açık `done: false` veya streaming
-`delta` içeren tek JSON belge tamamlanmış sayılmaz.
+Legacy istek alanları korunur. Önceki sürümle uyumlu olarak ardışık `data:`
+satırları (boş SSE ayıracı olmasa da), NDJSON, tek/çok satırlı JSON belgeleri ve
+ham metin desteklenir. `application/json` başlığıyla gelen satır akışları da
+parçalar geldikçe işlenir. `[DONE]` veya `done: true` varsa tamamlanma için
+kullanılır; bu işaretleri göndermeyen eski servislerde normal HTTP akış sonu
+kabul edilir. Bu eski sözleşmede, sağlayıcının içerik üretimini erken bitirip
+HTTP yanıtını normal kapatması istemci tarafından kesin olarak ayırt edilemez;
+aktarımdan önce önizlemeyi kontrol edin.
 
-Bozuk JSON, hata olayı, işaretsiz kesilen akış ve `finish_reason` / `done_reason`
-alanında `stop` dışındaki bitiş nedenleri reddedilir. Central da başarısız bitiş
-nedenlerini reddeder. Önceden kabul edilen ham metin veya yalnızca bağlantının
-kapanmasıyla biten Legacy akışları artık kabul edilmez; sağlayıcı bu sözleşmeye
-uymalıdır. Bu, eksik içeriğin tamamlanmış mail olarak aktarılmasını önler.
+Açık `done: false` ile biten yanıt, eksik/bozuk JSON, geçersiz UTF-8, hata olayı,
+HTTP/okuma hatası, iptal ve `stop` dışındaki başarısız bitiş nedenleri reddedilir.
+`response`, `text`, `content`, `output`, `message.content` ve OpenAI `choices`
+alanları desteklenir. Central'ın SSE ve `[DONE]` sözleşmesi değişmez.
 Her iki sağlayıcıda istek/yanıt sınırı 1 MiB; toplam süre `TimeoutMinutes` kadardır.
 
 ### Yeni doğrulama kapsamı
@@ -233,4 +269,4 @@ Windows üzerinde Visual Studio'nun **Office/SharePoint development** araçları
 7. Aktarım başarısızlığında yalnızca yeni oluşturulan taslağın kapatılması;
    kullanıcıya ait taslakların açık ve değişmeden kalması.
 8. Klavye ile düğmelere erişim, yüksek DPI'da okunabilirlik, popup'ta metin
-   önizlemesinin bulunmaması ve normal Outlook gönderiminin kullanıcı kontrolünde olması.
+   önizlemesinin üretim sırasında güncellenmesi ve normal Outlook gönderiminin kullanıcı kontrolünde olması.

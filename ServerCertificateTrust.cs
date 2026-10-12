@@ -7,11 +7,12 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace Askai
 {
-    public enum CertificateTrustMode { ServerCertificate, CertificateAuthority }
+    public enum CertificateTrustMode { ServerCertificate, CertificateAuthority, CertificateBundle }
 
     /// <summary>
     /// Handler-scoped public trust. CA mode requires a full path to the uploaded root.
     /// Server mode additionally pins its leaf; legacy single-leaf data keeps its original behavior.
+    /// Bundle mode trusts its root without leaf pinning or online revocation, only when explicitly selected.
     /// No system trust stores or global TLS policies are modified.
     /// </summary>
     internal sealed class ServerCertificateTrust
@@ -21,6 +22,7 @@ namespace Askai
         private readonly byte[] trustedRoot;
         private readonly bool legacySingleLeaf;
         public CertificateTrustMode Mode { get; }
+        public bool CheckRevocation => Mode != CertificateTrustMode.CertificateBundle;
         public int CertificateCount => material.Count;
         public string Fingerprint => material.Fingerprint;
         public string Description { get; }
@@ -35,9 +37,15 @@ namespace Askai
             using (var opened = material.Open())
             {
                 var certificates = opened.Certificates.Cast<X509Certificate2>().ToArray();
-                foreach (var certificate in certificates) RequireCurrent(certificate);
+                // In bundle mode, optional leaves are not trust anchors. Their expiry must not
+                // block a renewed live server; the callback validates the actual peer instead.
+                var requiredCertificates = mode == CertificateTrustMode.CertificateBundle
+                    ? certificates.Where(IsAuthority).ToArray() : certificates;
+                foreach (var certificate in requiredCertificates) RequireCurrent(certificate);
                 if (legacySingleLeaf)
                 {
+                    if (IsAuthority(certificates[0]))
+                        throw new AiServiceException("Seçilen sertifika bir CA sertifikasıdır. AI Ayarları'nda CA zincirine güven modunu seçip kök/ara CA dosyalarını yeniden yükleyin.");
                     if (!HasServerUsage(certificates[0])) throw InvalidChain();
                     pinnedServer = certificates[0].RawData;
                     Description = "Sunucu: " + certificates[0].GetNameInfo(X509NameType.DnsName, false)
@@ -59,9 +67,10 @@ namespace Askai
                     if (servers.Length != 1 || !HasServerUsage(servers[0])) throw InvalidChain();
                     pinnedServer = servers[0].RawData;
                 }
-                // Selection checks topology/signatures without revocation; live TLS checks revocation online.
-                foreach (var certificate in certificates) RequirePathToRoot(certificate, opened.Certificates);
-                Description = "Mod: " + (mode == CertificateTrustMode.CertificateAuthority ? "CA zincirine güven" : "Sunucu + ara/kök zinciri")
+                // Import checks topology/signatures. Live revocation is controlled by the explicit trust mode.
+                foreach (var certificate in requiredCertificates) RequirePathToRoot(certificate, opened.Certificates);
+                Description = "Mod: " + (mode == CertificateTrustMode.CertificateBundle ? "Sertifika paketi (CRL/OCSP kapalı)"
+                    : mode == CertificateTrustMode.CertificateAuthority ? "CA zincirine güven" : "Sunucu + ara/kök zinciri")
                     + "\r\nSertifika sayısı: " + material.Count
                     + "\r\nKök CA: " + roots[0].GetNameInfo(X509NameType.SimpleName, false)
                     + (servers.Length == 1 ? "\r\nSunucu: " + servers[0].GetNameInfo(X509NameType.DnsName, false) : "")
@@ -118,7 +127,7 @@ namespace Askai
         public X509Chain CreateValidationChain()
         {
             var validation = new X509Chain();
-            validation.ChainPolicy.RevocationMode = X509RevocationMode.Online;
+            validation.ChainPolicy.RevocationMode = CheckRevocation ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
             validation.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
             validation.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
             validation.ChainPolicy.ApplicationPolicy.Add(new Oid("1.3.6.1.5.5.7.3.1"));
@@ -128,13 +137,33 @@ namespace Askai
 
         public bool Validate(X509Certificate2 certificate, X509Chain peerChain, SslPolicyErrors errors)
         {
-            if (certificate == null || (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) != SslPolicyErrors.None)
-                return false; // Native hostname mismatch and missing/unknown peer errors must never be overridden.
+            string failure;
+            return Validate(certificate, peerChain, errors, out failure);
+        }
+
+        public bool Validate(X509Certificate2 certificate, X509Chain peerChain, SslPolicyErrors errors, out string failure)
+        {
+            failure = "Sunucu sertifikası doğrulanamadı.";
+            if (certificate == null || (errors & SslPolicyErrors.RemoteCertificateNotAvailable) != 0)
+            {
+                failure = "Sunucu sertifikası alınamadı.";
+                return false;
+            }
+            if ((errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0)
+            {
+                failure = "Sunucu adresi sertifikadaki adla eşleşmiyor. Central HTTPS adresini ve proxy sertifikasını kontrol edin.";
+                return false;
+            }
+            if ((errors & ~SslPolicyErrors.RemoteCertificateChainErrors) != SslPolicyErrors.None) return false;
             try
             {
                 if (legacySingleLeaf)
-                    return ValidateBuiltChain(certificate, peerChain)
+                {
+                    bool valid = ValidateBuiltChain(certificate, peerChain)
                         && (errors == SslPolicyErrors.None || peerChain.ChainStatus.Any(status => status.Status != X509ChainStatusFlags.NoError));
+                    failure = valid ? null : DescribeFailure(certificate, peerChain);
+                    return valid;
+                }
                 using (var opened = material.Open())
                 using (var validation = CreateValidationChain())
                 {
@@ -142,7 +171,9 @@ namespace Askai
                     if (peerChain != null)
                         foreach (var element in peerChain.ChainElements) validation.ChainPolicy.ExtraStore.Add(element.Certificate);
                     validation.Build(certificate);
-                    return ValidateBuiltChain(certificate, validation);
+                    bool valid = ValidateBuiltChain(certificate, validation);
+                    failure = valid ? null : DescribeFailure(certificate, validation);
+                    return valid;
                 }
             }
             catch (CryptographicException) { return false; }
@@ -150,7 +181,27 @@ namespace Askai
             catch (AiServiceException) { return false; }
         }
 
-        // Also used with offline topology fixtures. The live callback always supplies a rebuilt Online chain.
+        private string DescribeFailure(X509Certificate2 certificate, X509Chain chain)
+        {
+            if (!IsCurrent(certificate)) return "Sunucu sertifikasının süresi geçerli değil. Sertifikayı ve Windows saatini kontrol edin.";
+            if (pinnedServer != null && !Equal(pinnedServer, certificate.RawData))
+                return "Sunucunun sunduğu sertifika yüklenen sunucu sertifikasıyla eşleşmiyor. Sertifika yenilenmiş veya proxy tarafından değiştirilmiş olabilir; doğru sunucu sertifikasını yeniden seçin.";
+            if (!HasServerUsage(certificate)) return "Sertifika sunucu kimlik doğrulaması için uygun değil.";
+            if (chain == null || chain.ChainElements.Count == 0) return "Sunucu sertifika zinciri oluşturulamadı.";
+            var flags = X509ChainStatusFlags.NoError;
+            foreach (var status in chain.ChainStatus) flags |= status.Status;
+            if ((flags & X509ChainStatusFlags.Revoked) != 0) return "Sunucu sertifika zincirinde iptal edilmiş sertifika var.";
+            if ((flags & X509ChainStatusFlags.PartialChain) != 0 && !legacySingleLeaf)
+                return "Sertifika zinciri eksik. Doğru kök ve ara CA sertifikalarını yükleyin.";
+            if ((flags & (X509ChainStatusFlags.OfflineRevocation | X509ChainStatusFlags.RevocationStatusUnknown)) != 0)
+                return "Sertifika iptal durumu doğrulanamadı (CRL/OCSP). Windows'un iptal servisine ağ/proxy erişimini ve sunucunun iptal bilgilerini kontrol edin.";
+            if (trustedRoot != null && !Equal(trustedRoot, chain.ChainElements[chain.ChainElements.Count - 1].Certificate.RawData))
+                return "Sunucu sertifika zinciri yüklenen kök CA'da sonlanmıyor. Doğru CA zincirini seçin.";
+            // Only enum flags, never native status text, names, URLs or provider data.
+            return "Sunucu sertifika zinciri reddedildi. Zincir durumu: " + flags + ".";
+        }
+
+        // Also used with topology fixtures. Bundle/CA/server-chain callbacks rebuild using their selected policy.
         public bool ValidateBuiltChain(X509Certificate2 certificate, X509Chain chain)
         {
             try
@@ -234,7 +285,7 @@ namespace Askai
         }
         private static AiServiceException InvalidChain()
         {
-            return new AiServiceException("Geçerli, tek bir kökte sonlanan zincir seçin. CA modunda yalnızca CA sertifikaları; sunucu modunda tek bir sunucu ve ara/kök sertifikaları gerekir. Eksik veya ilgisiz zincirler kabul edilmez.");
+            return new AiServiceException("Geçerli, tek bir kökte sonlanan zincir seçin. CA modunda yalnızca CA sertifikaları; sunucu modunda tek bir sunucu ve ara/kök sertifikaları gerekir. Paket modunda kök ve ara sertifikalara ek olarak sunucu sertifikası bulunabilir. Eksik veya ilgisiz zincirler kabul edilmez.");
         }
     }
 }

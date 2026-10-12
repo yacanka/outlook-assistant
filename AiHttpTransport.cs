@@ -68,9 +68,21 @@ namespace Askai
             if (useTls12) handler.SslProtocols = SslProtocols.Tls12;
             if (trust != null)
             {
-                handler.CheckCertificateRevocationList = true;
+                handler.CheckCertificateRevocationList = trust.CheckRevocation;
                 handler.ServerCertificateCustomValidationCallback = (request, certificate, chain, errors) =>
-                    trust.Validate(certificate, chain, errors);
+                {
+                    string failure;
+                    bool valid = trust.Validate(certificate, chain, errors, out failure);
+                    // A shared handler can serve concurrent requests. Keep diagnostics on this request.
+                    if (request != null)
+                    {
+#pragma warning disable CS0618 // Properties is required by the .NET Framework 4.7.2 production target.
+                        request.Properties.Remove(AiConnectionErrors.CertificateFailureKey);
+                        if (!valid) request.Properties[AiConnectionErrors.CertificateFailureKey] = failure;
+#pragma warning restore CS0618
+                    }
+                    return valid;
+                };
             }
             return handler;
         }

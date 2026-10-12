@@ -62,6 +62,14 @@ internal static class ConnectionDiagnosticsTests
                 Check(error.Message.Contains("0x80090326") && !error.Message.Contains("private"),
                     "native TLS diagnostic code reaches UI without private exception text");
 
+                if (central)
+                {
+                    handler.CertificateFailure = "Sertifika iptal durumu doğrulanamadı (CRL/OCSP).";
+                    error = await ReadFailure(send);
+                    Check(error.Message.Contains("CRL/OCSP"), "Central passes the request's certificate diagnostic to UI");
+                    handler.CertificateFailure = null;
+                }
+
                 handler.Error = new HttpRequestException("Synthetic transport detail", new SocketException((int)SocketError.HostNotFound));
                 error = await ReadFailure(send);
                 Check(error.Message.Contains("DNS"), "DNS failure is distinct from TLS");
@@ -89,9 +97,13 @@ internal static class ConnectionDiagnosticsTests
         public string MediaType = "text/html";
         public string Payload = "<html>Synthetic private login page</html>";
         public Exception Error;
+        public string CertificateFailure;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
         {
             cancellation.ThrowIfCancellationRequested();
+#pragma warning disable CS0618
+            if (CertificateFailure != null) request.Properties[AiConnectionErrors.CertificateFailureKey] = CertificateFailure;
+#pragma warning restore CS0618
             if (Error != null) throw Error;
             return Task.FromResult(new HttpResponseMessage(Status)
             {

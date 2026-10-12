@@ -65,7 +65,7 @@ namespace Askai
                 }
                 catch (HttpRequestException ex) when (!(ex is AiServiceException))
                 {
-                    throw AiConnectionErrors.FromTransport("Central", ex);
+                    throw AiConnectionErrors.FromTransport("Central", ex, request);
                 }
             }
         }

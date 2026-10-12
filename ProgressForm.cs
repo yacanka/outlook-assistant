@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Drawing;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -17,6 +18,14 @@ namespace Ask.ai
         private readonly Button apply = new Button { Text = "&Mail’e aktar", AutoSize = true, Enabled = false };
         private readonly Button cancel = new Button { Text = "&İptal", AutoSize = true };
         private readonly System.Windows.Forms.Timer statusTimer;
+        private readonly TextBox preview = new TextBox
+        {
+            Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
+            Dock = DockStyle.Fill, BackColor = SystemColors.Window, Height = 180,
+            MinimumSize = new Size(0, 150), MaxLength = 1024 * 1024, TabStop = true
+        };
+        private readonly object chunkLock = new object();
+        private readonly StringBuilder pendingText = new StringBuilder();
         private int receivedCharacters;
         private bool finished;
         private bool applying;
@@ -29,18 +38,19 @@ namespace Ask.ai
             Font = new Font("Segoe UI", 10f);
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(560, 280);
+            ClientSize = new Size(640, 500);
             MinimumSize = SizeFromClientSize(new Size(400, 200));
             StartPosition = FormStartPosition.CenterScreen;
             MaximizeBox = false;
             MinimizeBox = false;
             var layout = new ResponsiveTableLayoutPanel
             {
-                Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 1, RowCount = 6
+                Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 1, RowCount = 7
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -50,16 +60,17 @@ namespace Ask.ai
             status.Text = "İstek hazırlanıyor; servisten içerik bekleniyor…";
             layout.Controls.Add(status, 0, 2);
             action.Text = approvalMessage;
-            layout.Controls.Add(action, 0, 3);
+            layout.Controls.Add(preview, 0, 3);
+            layout.Controls.Add(action, 0, 4);
             layout.Controls.Add(new Label
             {
                 Text = "Uygulama mail göndermez. Aktarımdan sonra metni Outlook’ta inceleyip düzenleyebilirsiniz.",
                 AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 8)
-            }, 0, 4);
+            }, 0, 5);
             var buttons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(apply);
-            layout.Controls.Add(buttons, 0, 5);
+            layout.Controls.Add(buttons, 0, 6);
             Controls.Add(layout);
             CancelButton = cancel;
             cancel.Click += (sender, args) => Close();
@@ -75,22 +86,38 @@ namespace Ask.ai
             statusTimer = new System.Windows.Forms.Timer(components) { Interval = 150 };
             statusTimer.Tick += (sender, args) =>
             {
-                int count = Volatile.Read(ref receivedCharacters);
+                FlushPreview();
+                int count = receivedCharacters;
                 if (count > 0) status.Text = "İçerik hazırlanıyor… (" + count + " karakter alındı)";
             };
             statusTimer.Start();
         }
 
-        // Transport callbacks never touch WinForms controls or retain generated text.
+        // Transport callbacks only queue text; the UI timer batches updates on the UI thread.
         public void ReportChunk(string chunk)
         {
-            if (chunk != null) Interlocked.Add(ref receivedCharacters, chunk.Length);
+            if (string.IsNullOrEmpty(chunk)) return;
+            lock (chunkLock) pendingText.Append(chunk);
+        }
+
+        private void FlushPreview()
+        {
+            string text;
+            lock (chunkLock)
+            {
+                if (pendingText.Length == 0) return;
+                text = pendingText.ToString();
+                pendingText.Clear();
+            }
+            receivedCharacters += text.Length;
+            preview.AppendText(text);
         }
 
         public void SetReady()
         {
             if (IsDisposed || cancellation.IsCancellationRequested) return;
             statusTimer.Stop();
+            FlushPreview();
             progress.Style = ProgressBarStyle.Continuous;
             progress.Value = 100;
             status.Text = "İçerik hazır. Mail’e aktarmak için onayınız bekleniyor.";

@@ -24,6 +24,8 @@ namespace Askai
 
     internal static class AiConnectionErrors
     {
+        internal const string CertificateFailureKey = "Askai.CertificateFailure";
+
         public static void CheckResponse(HttpResponseMessage response, string provider, bool requireEventStream)
         {
             int status = (int)response.StatusCode;
@@ -63,8 +65,13 @@ namespace Askai
             }
         }
 
-        public static AiServiceException FromTransport(string provider, HttpRequestException error)
+        public static AiServiceException FromTransport(string provider, HttpRequestException error, HttpRequestMessage request = null)
         {
+            object failure;
+#pragma warning disable CS0618 // .NET Framework request-scoped diagnostics.
+            if (request != null && request.Properties.TryGetValue(CertificateFailureKey, out failure) && failure is string)
+                return new AiServiceException(provider + " AI: " + (string)failure + NativeErrorDetail(error), error);
+#pragma warning restore CS0618
             bool tls = false;
             bool dns = false;
             for (Exception cause = error; cause != null; cause = cause.InnerException)

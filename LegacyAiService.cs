@@ -18,9 +18,8 @@ namespace Askai
         public LegacyAiService(HttpClient client) { this.client = client ?? throw new ArgumentNullException(nameof(client)); }
 
         /// <summary>
-        /// Retains the Legacy request contract. SSE requires [DONE], NDJSON requires done:true;
-        /// a standalone application/json document must contain a complete response.
-        /// Partial data, provider errors and malformed records never become a mail draft.
+        /// Retains the Legacy line-oriented response contract, including raw text and clean EOF.
+        /// Explicit incomplete/error records, invalid JSON and transport failures are rejected.
         /// </summary>
         public async Task<string> SendStreamingRequestAsync(string userPrompt, Action<string> onChunk,
             CancellationToken cancellationToken)
@@ -48,12 +47,9 @@ namespace Askai
                     using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false))
                     {
                         AiConnectionErrors.CheckResponse(response, "Legacy", requireEventStream: false);
-                        string mediaType = response.Content.Headers.ContentType?.MediaType;
                         using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                         using (deadline.Token.Register(() => stream.Dispose()))
                         {
-                            if (string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase))
-                                return await ReadDocumentAsync(stream, onChunk, deadline.Token).ConfigureAwait(false);
                             return await ReadStreamAsync(stream, onChunk, deadline.Token).ConfigureAwait(false);
                         }
                     }
@@ -63,29 +59,11 @@ namespace Askai
                     cancellationToken.ThrowIfCancellationRequested();
                     throw new TimeoutException("Legacy AI isteği zaman aşımına uğradı.");
                 }
+                catch (DecoderFallbackException) { throw InvalidStream(); }
                 catch (HttpRequestException ex) when (!(ex is AiServiceException))
                 {
                     throw AiConnectionErrors.FromTransport("Legacy", ex);
                 }
-            }
-        }
-
-        private static async Task<string> ReadDocumentAsync(Stream stream, Action<string> onChunk, CancellationToken token)
-        {
-            using (var body = new MemoryStream())
-            {
-                var buffer = new byte[4096];
-                int count;
-                while ((count = await stream.ReadAsync(buffer, 0, buffer.Length, token).ConfigureAwait(false)) != 0)
-                {
-                    if (body.Length + count > MaxBytes) throw InvalidStream();
-                    body.Write(buffer, 0, count);
-                }
-                bool completed;
-                string result = ParsePayload(new UTF8Encoding(false, true).GetString(body.ToArray()), true, out completed);
-                if (!completed) throw InvalidStream();
-                onChunk?.Invoke(result);
-                return result;
             }
         }
 
@@ -102,11 +80,12 @@ namespace Askai
                 int count = await stream.ReadAsync(buffer, 0, buffer.Length, token).ConfigureAwait(false);
                 if (count == 0)
                 {
-                    // A final NDJSON record may lack a newline. SSE still needs its event boundary.
+                    decoder.GetChars(buffer, 0, 0, chars, 0, true); // Reject an incomplete UTF-8 sequence.
                     if (line.Length > 0 && parser.ProcessLine(line.ToString().TrimEnd('\r')))
                         return parser.Result;
-                    throw InvalidStream();
+                    return parser.Complete();
                 }
+                token.ThrowIfCancellationRequested();
                 total += count;
                 if (total > MaxBytes) throw InvalidStream();
                 int length = decoder.GetChars(buffer, 0, count, chars, 0);
@@ -123,18 +102,14 @@ namespace Askai
         private sealed class ResponseStream
         {
             private readonly StringBuilder result = new StringBuilder();
-            private readonly StringBuilder eventData = new StringBuilder();
+            private readonly StringBuilder pendingJson = new StringBuilder();
             private readonly Action<string> onChunk;
+            private bool requiresCompletion;
             public string Result => result.ToString();
             public ResponseStream(Action<string> onChunk) { this.onChunk = onChunk; }
 
             public bool ProcessLine(string line)
             {
-                if (line.StartsWith("data:", StringComparison.Ordinal))
-                {
-                    eventData.Append(line.Substring(5).TrimStart(' ')).Append('\n');
-                    return false;
-                }
                 if (line.StartsWith("event:", StringComparison.Ordinal))
                 {
                     if (line.Substring(6).Trim() == "error") throw InvalidStream();
@@ -142,34 +117,68 @@ namespace Askai
                 }
                 if (line.StartsWith(":", StringComparison.Ordinal) || line.StartsWith("id:", StringComparison.Ordinal)
                     || line.StartsWith("retry:", StringComparison.Ordinal)) return false;
-                if (line.Length == 0)
+                bool dataRecord = line.StartsWith("data:", StringComparison.Ordinal);
+                if (dataRecord) line = line.Substring(5).TrimStart(' ');
+                if (string.IsNullOrWhiteSpace(line)) return false;
+                if (line.Trim() == "[DONE]")
                 {
-                    if (eventData.Length == 0) return false;
-                    string payload = eventData.ToString().TrimEnd('\n');
-                    eventData.Clear();
-                    return AppendPayload(payload);
+                    if (pendingJson.Length != 0) throw InvalidStream();
+                    return true;
                 }
-                if (eventData.Length > 0) throw InvalidStream();
-                return AppendPayload(line);
+
+                // This provider also sends consecutive data: lines without SSE blank boundaries.
+                // Decode complete records immediately, while allowing pretty-printed JSON documents.
+                string trimmed = line.TrimStart();
+                if (pendingJson.Length > 0 || trimmed.StartsWith("{") || trimmed.StartsWith("["))
+                    return AppendJson(line);
+                if (trimmed.StartsWith("<")) throw InvalidStream(); // Do not turn an HTML error page into mail.
+                // The original plain-text response format separates physical lines as paragraphs.
+                AppendText(dataRecord ? line : line + "\n\n");
+                return false;
             }
 
-            private bool AppendPayload(string payload)
+            private bool AppendJson(string line)
             {
-                if (payload == "[DONE]") return true;
-                bool completed;
-                string chunk = ParsePayload(payload, false, out completed);
-                if (!string.IsNullOrEmpty(chunk))
+                pendingJson.Append(line).Append('\n');
+                string payload = pendingJson.ToString();
+                try
                 {
-                    // Preserve the Legacy provider's literal newline convention.
-                    chunk = chunk.Replace("\\r\\n", "\r\n").Replace("\\n", "\n").Replace("\\r", "\r");
-                    result.Append(chunk);
-                    onChunk?.Invoke(chunk);
+                    var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(payload), false, default);
+                    JsonDocument document;
+                    if (!JsonDocument.TryParseValue(ref reader, out document)) return false;
+                    using (document)
+                    {
+                        JsonElement done;
+                        if (document.RootElement.ValueKind != JsonValueKind.Object) throw InvalidStream();
+                        if (document.RootElement.TryGetProperty("done", out done)) requiresCompletion = !done.GetBoolean();
+                    }
                 }
+                catch (JsonException) { throw InvalidStream(); }
+                catch (InvalidOperationException) { throw InvalidStream(); }
+                pendingJson.Clear();
+                bool completed;
+                AppendText(ParsePayload(payload, out completed));
                 return completed;
+            }
+
+            private void AppendText(string chunk)
+            {
+                if (string.IsNullOrEmpty(chunk)) return;
+                chunk = chunk.Replace("\\r\\n", "\r\n").Replace("\\n", "\n").Replace("\\r", "\r");
+                result.Append(chunk);
+                onChunk?.Invoke(chunk);
+            }
+
+            public string Complete()
+            {
+                // Older Legacy servers have no terminator. A clean HTTP EOF is their contract;
+                // explicit done:false, broken records and read failures must still fail closed.
+                if (pendingJson.Length != 0 || requiresCompletion || result.Length == 0) throw InvalidStream();
+                return Result;
             }
         }
 
-        private static string ParsePayload(string json, bool standalone, out bool completed)
+        private static string ParsePayload(string json, out bool completed)
         {
             completed = false;
             try
@@ -183,10 +192,9 @@ namespace Askai
                         && value.GetString() != "stop") throw InvalidStream();
                     bool hasDone = root.TryGetProperty("done", out value);
                     if (hasDone) completed = value.GetBoolean();
-                    else completed = standalone;
                     JsonElement choices;
                     if (root.TryGetProperty("choices", out choices))
-                        return ParseChoice(choices, standalone, ref completed);
+                        return ParseChoice(choices, ref completed);
                     if (root.TryGetProperty("message", out value)) return ReadContent(value);
                     foreach (string property in new[] { "response", "text", "content", "output" })
                         if (root.TryGetProperty(property, out value)) return value.GetString();
@@ -198,7 +206,7 @@ namespace Askai
             catch (InvalidOperationException) { throw InvalidStream(); }
         }
 
-        private static string ParseChoice(JsonElement choices, bool standalone, ref bool completed)
+        private static string ParseChoice(JsonElement choices, ref bool completed)
         {
             if (choices.GetArrayLength() == 0)
             {
@@ -212,7 +220,6 @@ namespace Askai
             if (choice.TryGetProperty("delta", out value))
             {
                 completed = false;
-                if (standalone) throw InvalidStream();
                 return ReadContent(value);
             }
             if (choice.TryGetProperty("message", out value)) return ReadContent(value);

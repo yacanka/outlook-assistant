@@ -43,6 +43,22 @@ internal static class ServerCertificateTests
                 Check(validate != null && validate(null, original, chain, SslPolicyErrors.RemoteCertificateChainErrors),
                     "manual certificate wired to the actual AI handler");
                 Check(!validate(null, rotated, otherChain, SslPolicyErrors.None), "handler enforces exact certificate match");
+                using (var request = new System.Net.Http.HttpRequestMessage())
+                {
+                    Check(!validate(request, original, chain, SslPolicyErrors.RemoteCertificateNameMismatch),
+                        "hostname mismatch remains rejected");
+#pragma warning disable CS0618
+                    Check(request.Properties.Count == 1, "TLS rejection records a request-scoped safe diagnostic");
+                    var error = AiConnectionErrors.FromTransport("Central", new System.Net.Http.HttpRequestException("private"), request);
+                    Check(error.Message.Contains("adla eşleşmiyor") && !error.Message.Contains("private"),
+                        "hostname diagnostic reaches UI without raw exception details");
+                    Check(!validate(request, rotated, otherChain, SslPolicyErrors.None), "rotated certificate still rejected");
+                    error = AiConnectionErrors.FromTransport("Central", new System.Net.Http.HttpRequestException("private"), request);
+                    Check(error.Message.Contains("yüklenen sunucu sertifikasıyla eşleşmiyor"), "pin mismatch distinguished from hostname errors");
+                    Check(validate(request, original, chain, SslPolicyErrors.None) && request.Properties.Count == 0,
+                        "successful validation clears earlier diagnostic on the same request");
+#pragma warning restore CS0618
+                }
                 Check(handler.UseProxy && !handler.AllowAutoRedirect, "manual trust preserves proxy and redirect controls");
             }
             var pinned = AiHttpTransport.GetClient(false, serverCertificateBase64: encoded);
