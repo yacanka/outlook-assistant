@@ -12,6 +12,13 @@ class Program
 {
     static async Task Main(string[] args)
     {
+        if (Array.IndexOf(args, "--diagnostics-only") >= 0)
+        {
+            AppConfig.CentralApiUrl = "https://example.invalid/chat";
+            AppConfig.CentralModels = new[] { "test-model" };
+            await ConnectionDiagnosticsTests.Run();
+            return;
+        }
         MailGenerationTests.Run();
         MailFormattingTests.Run();
         if (args.Length == 2 && args[0] == "--rtf-fixtures") { MailFormattingTests.WriteFixtures(args[1]); return; }

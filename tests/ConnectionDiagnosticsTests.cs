@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -13,6 +14,8 @@ internal static class ConnectionDiagnosticsTests
 {
     public static async Task Run()
     {
+        await CheckConfigurationErrors();
+        CheckUnexpectedMailErrors();
         foreach (bool central in new[] { true, false })
         {
             var handler = new Handler();
@@ -98,6 +101,46 @@ internal static class ConnectionDiagnosticsTests
             }
         }
         Console.WriteLine("Connection diagnostics passed (HTTP, HTML/JSON, certificate/TLS, DNS, private details).");
+    }
+
+    private static async Task CheckConfigurationErrors()
+    {
+        using (var client = new HttpClient(new Handler()))
+        {
+            var service = new CentralAiService(client);
+            var error = await ReadFailure(() => service.SendAsync("Synthetic request", "unknown", "test-token", null, default));
+            Check(error is AiServiceException && error.Message.Contains("model"), "Invalid saved model reaches UI as a safe service error");
+            error = await ReadFailure(() => service.SendAsync("Synthetic request", "test-model", "", null, default));
+            Check(error is AiServiceException && error.Message.Contains("token"), "Missing token reaches UI as a safe service error");
+            string originalUrl = AppConfig.CentralApiUrl;
+            try
+            {
+                AppConfig.CentralApiUrl = "http://example.invalid/chat";
+                error = await ReadFailure(() => service.SendAsync("Synthetic request", "test-model", "test-token", null, default));
+                Check(error is AiServiceException && error.Message.Contains("HTTPS"), "Invalid endpoint reaches UI as a safe service error");
+            }
+            finally { AppConfig.CentralApiUrl = originalUrl; }
+        }
+    }
+
+    private static void CheckUnexpectedMailErrors()
+    {
+        var missing = new FileNotFoundException("private token and mail body", "private-library-path.dll");
+        var wrapper = new TypeInitializationException("PrivateProviderName", missing);
+        string message = AiConnectionErrors.UnexpectedMailError(wrapper, MailActionStage.Request);
+        Check(message.Contains("AI isteği") && message.Contains("FileNotFoundException")
+            && message.Contains("0x80070002") && message.Contains("kurulum"),
+            "Wrapped missing dependency identifies the request stage, failure code and recovery");
+        Check(!message.Contains("private") && !message.Contains("PrivateProviderName"),
+            "Diagnostics never expose exception messages, file names or wrapper type names");
+        var com = new System.Runtime.InteropServices.COMException("private mail content", unchecked((int)0x80004005));
+        message = AiConnectionErrors.UnexpectedMailError(com, MailActionStage.Applying);
+        Check(message.Contains("Outlook’a aktarım") && message.Contains("COMException") && message.Contains("0x80004005"),
+            "COM diagnostics distinguish transfer failures from service failures");
+        Check(!message.Contains("private"), "COM message stays private");
+        message = AiConnectionErrors.UnexpectedMailError(new Exception("private"), MailActionStage.Preparing);
+        Check(message.Contains("Hazırlık") && message.Contains("Beklenmeyen hata") && !message.Contains("private"),
+            "Unknown failures remain safe and identify their stage");
     }
 
     private static async Task<HttpRequestException> ReadFailure(Func<Task<string>> send)

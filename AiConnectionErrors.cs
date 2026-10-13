@@ -6,10 +6,13 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Authentication;
 
 namespace Askai
 {
+    internal enum MailActionStage { Outlook, Settings, Input, Preparing, Request, Preview, Approval, Applying }
+
     // Only application-authored messages may use these types; UI must never display raw
     // provider bodies, redirect locations, URLs or transport exception messages.
     internal sealed class AiServiceException : HttpRequestException
@@ -26,6 +29,58 @@ namespace Askai
     internal static class AiConnectionErrors
     {
         internal const string CertificateFailureKey = "Askai.CertificateFailure";
+
+        // Exception messages, file names and stack traces may contain credentials or mail
+        // content. Expose only fixed categories and numeric codes, including wrapped failures.
+        public static string UnexpectedMailError(Exception error, MailActionStage stage)
+        {
+            Exception cause = error;
+            for (int depth = 0; depth < 8 && cause.InnerException != null; depth++)
+                cause = cause.InnerException;
+            string category = DependencyCategory(cause);
+            bool dependency = category != null;
+            if (!dependency)
+            {
+                category = "Beklenmeyen hata";
+                if (cause is COMException) category = "COMException";
+                else if (cause is NotSupportedException) category = "NotSupportedException";
+                else if (cause is InvalidOperationException) category = "InvalidOperationException";
+                else if (cause is ArgumentException) category = "ArgumentException";
+            }
+            string advice = dependency
+                ? "Eklenti bileşeni yüklenemedi. Güncel kurulum paketindeki DLL ve bağımlılıkların tamamının kurulduğunu kontrol edin."
+                : stage == MailActionStage.Settings
+                    ? "AI ayarları okunamadı. AI Asistan ayarlarını açıp yeniden kaydedin."
+                    : "Bu aşama ve hata koduyla destek isteyin. Açılan taslak varsa içeriğini kontrol edin.";
+            return "Mail işlemi tamamlanamadı. Aşama: " + StageName(stage) + ". " + category +
+                " (0x" + cause.HResult.ToString("X8", CultureInfo.InvariantCulture) + "). " + advice;
+        }
+
+        private static string DependencyCategory(Exception error)
+        {
+            if (error is FileNotFoundException) return "FileNotFoundException";
+            if (error is FileLoadException) return "FileLoadException";
+            if (error is BadImageFormatException) return "BadImageFormatException";
+            if (error is TypeLoadException) return "TypeLoadException";
+            if (error is MissingMethodException) return "MissingMethodException";
+            if (error is TypeInitializationException) return "TypeInitializationException";
+            return null;
+        }
+
+        private static string StageName(MailActionStage stage)
+        {
+            switch (stage)
+            {
+                case MailActionStage.Outlook: return "Outlook hedefini okuma";
+                case MailActionStage.Settings: return "AI ayarlarını okuma";
+                case MailActionStage.Input: return "Konu ve talimat";
+                case MailActionStage.Request: return "AI isteği";
+                case MailActionStage.Preview: return "Önizleme";
+                case MailActionStage.Approval: return "Aktarım onayı";
+                case MailActionStage.Applying: return "Outlook’a aktarım";
+                default: return "Hazırlık";
+            }
+        }
 
         public static void CheckResponse(HttpResponseMessage response, string provider, bool requireEventStream)
         {

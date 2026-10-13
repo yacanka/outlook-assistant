@@ -24,11 +24,11 @@ namespace Askai
             if (!Uri.TryCreate(AppConfig.CentralApiUrl, UriKind.Absolute, out uri)
                 || uri.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(uri.UserInfo)
                 || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-                throw new InvalidOperationException("PLUS AI servisi için config içinde geçerli bir HTTPS URL tanımlayın.");
+                throw new AiServiceException("PLUS AI servisi için config içinde geçerli bir HTTPS URL tanımlayın.");
             if (string.IsNullOrWhiteSpace(model) || !AppConfig.CentralModels.Contains(model))
-                throw new InvalidOperationException("Ayarlar → Servis üzerinden yapılandırılmış bir PLUS AI modeli seçin.");
+                throw new AiServiceException("Ayarlar → Servis üzerinden yapılandırılmış bir PLUS AI modeli seçin.");
             if (string.IsNullOrWhiteSpace(token) || token.IndexOfAny(new[] { '\r', '\n' }) >= 0)
-                throw new InvalidOperationException("Ayarlar → Servis üzerinden geçerli bir PLUS AI token’ı girin.");
+                throw new AiServiceException("Ayarlar → Servis üzerinden geçerli bir PLUS AI token’ı girin.");
             if (string.IsNullOrWhiteSpace(prompt)) throw new ArgumentException("İstek boş olamaz.");
             var payload = JsonSerializer.Serialize(new
             {
@@ -40,7 +40,7 @@ namespace Askai
                 }
             });
             if (Encoding.UTF8.GetByteCount(payload) > 1024 * 1024)
-                throw new InvalidOperationException("AI isteği boyut sınırını aşıyor.");
+                throw new AiServiceException("AI isteği boyut sınırını aşıyor.");
             using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             using (var request = new HttpRequestMessage(HttpMethod.Post, uri))
             {

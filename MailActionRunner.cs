@@ -17,24 +17,28 @@ namespace Ask.ai
                 MessageBox.Show("Önce devam eden AI işlemini tamamlayın veya iptal edin.", AiBrand.Name);
                 return;
             }
+            var stage = MailActionStage.Outlook;
             try
             {
                 using (var target = OutlookMailTarget.Capture(Globals.ThisAddIn.Application, windowContext, capability))
                 {
+                    stage = MailActionStage.Settings;
                     var settings = AiSettings.Load();
                     target.ApplyMarkdown = settings.ApplyMarkdown;
+                    stage = MailActionStage.Input;
                     var request = ReadRequest(capability, target);
                     if (request == null) return;
-                    await PrepareAndApplyAsync(request, target, settings);
+                    stage = MailActionStage.Preparing;
+                    await PrepareAndApplyAsync(request, target, settings, value => stage = value);
                 }
             }
             catch (MailActionException ex) { ShowError(ex.Message); }
             catch (AiServiceException ex) { ShowError(ex.Message); }
             catch (AiResponseException ex) { ShowError(ex.Message); }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Never surface COM details, provider response bodies or credentials.
-                ShowError("Mail işlemi tamamlanamadı. Outlook penceresini ve AI ayarlarınızı kontrol edip yeniden deneyin. Açılan taslak varsa içeriğini kontrol edin.");
+                ShowError(AiConnectionErrors.UnexpectedMailError(ex, stage));
             }
             finally { Volatile.Write(ref running, 0); }
         }
@@ -52,7 +56,8 @@ namespace Ask.ai
             }
         }
 
-        private static async Task PrepareAndApplyAsync(MailGenerationRequest request, OutlookMailTarget target, AiSettings settings)
+        private static async Task PrepareAndApplyAsync(MailGenerationRequest request, OutlookMailTarget target, AiSettings settings,
+            Action<MailActionStage> setStage)
         {
             string prompt = request.BuildPrompt(settings.MemoryEnabled ? settings.MemoryText : null);
             var session = new MailGenerationSession();
@@ -62,12 +67,16 @@ namespace Ask.ai
                 progress.Show();
                 try
                 {
+                    setStage(MailActionStage.Request);
                     string result = await new AiService().SendStreamingRequestAsync(prompt, progress.ReportChunk, cancellation.Token, settings);
                     cancellation.Token.ThrowIfCancellationRequested();
                     if (!session.Complete(result)) return;
+                    setStage(MailActionStage.Preview);
                     progress.SetReady(result);
+                    setStage(MailActionStage.Approval);
                     if (!await progress.WaitForApprovalAsync()) { session.Cancel(); return; }
                     cancellation.Token.ThrowIfCancellationRequested();
+                    setStage(MailActionStage.Applying);
                     session.ApplyApproved(target);
                 }
                 catch (OperationCanceledException) { session.Cancel(); }

@@ -215,6 +215,44 @@ Schannel bağlantısı, sertifika seç/kaydet/yeniden aç/temizle, mod değişti
 sertifika yenilenmesi, iptal edilmiş sertifika ve erişilemeyen CRL/OCSP senaryoları
 ayrıca doğrulanmalıdır.
 
+## Genel mail hatasını ayırt etme
+
+Beklenmeyen mail hataları artık işlem aşamasını (ayar okuma, hazırlık, AI isteği,
+önizleme veya Outlook’a aktarım), güvenli hata kategorisini ve hexadecimal hata
+kodunu gösterir. Ham exception mesajları, dosya yolları, token ve mail içeriği
+gösterilmez veya loglanmaz. Model, token ve endpoint doğrulama hataları kendi
+açıklamalarıyla gösterilir. Bu tanı üretim sorununu otomatik olarak çözmez;
+hata aşaması ve kodu kök neden araştırması için kullanılmalıdır.
+
+`FileNotFoundException`, `FileLoadException`, `TypeLoadException` veya
+`MissingMethodException` görülürse güncel kurulumdaki assembly ve bağımlılıkları
+kontrol edin. Son sürüm `Markdig` bağımlılığı içerir; yalnızca `Ask.ai.dll`
+dosyasını taşımak yeterli olmayabilir. Windows Visual Studio üzerinde NuGet
+restore, Rebuild ve Publish işlemleriyle tam kurulum paketini oluşturun.
+Yeni tanı mesajları ancak bu sürüm Outlook’a yüklendikten sonra görünür.
+
+`System.Memory` sürüm çakışması (MSB3277) için proje artık JSON bağımlılığını
+`System.Text.Json` 9.0.0 NuGet paketi üzerinden alır. Visual Studio
+`PublicAssemblies` klasöründen alınan elle eklenmiş `System.Memory`,
+`System.Text.Json` ve `System.Threading.Tasks.Extensions` referansları kaldırılmıştır.
+Markdig 1.4.0, `System.Memory` 4.6.3 paketini ister; bu paketin assembly sürümü
+4.0.5.0'dır. NuGet ortak bağımlılıkları çözer ve .NET Framework sürüm yönlendirmeleri
+derleme sırasında `Ask.ai.dll.config` dosyasına üretilir. Bu dosya da DLL'lerle
+birlikte yayımlanmalıdır; Outlook'un genel config dosyasını değiştirmeyin.
+
+Windows'ta güncel projeyle Outlook'u kapatın, NuGet paketlerini geri yükleyin,
+Clean Solution ve Rebuild Solution çalıştırın, ardından Publish ile tam paketi
+yeniden oluşturup yükleyin. `System.Memory` çakışmasının artık çıkmadığını ve
+yayın çıktısında NuGet bağımlılıklarıyla `Ask.ai.dll.config` dosyasının bulunduğunu
+kontrol edin. Birden fazla sürümün elle eklenmesi veya eski DLL'lerin tek tek
+taşınması aynı problemi yeniden oluşturabilir.
+
+Tanı testlerini sertifika testlerinden bağımsız çalıştırmak için:
+
+```sh
+dotnet run --project tests/TransportTests.csproj -- --diagnostics-only
+```
+
 ## Mail yetenekleri
 
 - **Mail Hazırla:** Ana Outlook penceresindeki AI Asistan grubunda bulunur.
