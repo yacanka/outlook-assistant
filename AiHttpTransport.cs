@@ -24,19 +24,17 @@ namespace Askai
         {
             if (!string.IsNullOrEmpty(serverCertificateBase64))
             {
-                if (forLegacy)
-                    throw new AiServiceException("Manuel sunucu sertifikası yalnızca PLUS AI HTTPS bağlantısında kullanılabilir.");
                 // Revalidate lifetime on every request, including reuse of an existing TLS connection.
                 var trust = ServerCertificateTrust.FromBase64(serverCertificateBase64, certificateTrustMode);
-                return GetCertificateClient(useTls12, trust);
+                return GetCertificateClient(useTls12, forLegacy, trust);
             }
             if (forLegacy) return (useTls12 ? legacyTls12 : legacyDefault).Value;
             return (useTls12 ? centralTls12 : centralDefault).Value;
         }
 
-        private static HttpClient GetCertificateClient(bool useTls12, ServerCertificateTrust trust)
+        private static HttpClient GetCertificateClient(bool useTls12, bool forLegacy, ServerCertificateTrust trust)
         {
-            string key = (useTls12 ? "tls12:" : "default:") + trust.Mode + ":" + trust.Fingerprint;
+            string key = (forLegacy ? "legacy:" : "central:") + (useTls12 ? "tls12:" : "default:") + trust.Mode + ":" + trust.Fingerprint;
             Lazy<HttpClient> client;
             lock (certificatePoolLock)
             {

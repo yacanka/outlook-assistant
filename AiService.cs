@@ -16,7 +16,9 @@ namespace Askai
             CancellationToken cancellationToken, AiSettings settings)
         {
             if (settings.Provider == AiProvider.Legacy)
-                return new LegacyAiService(AiHttpTransport.GetClient(settings.UseTls12, forLegacy: true))
+                return new LegacyAiService(AiHttpTransport.GetClient(settings.UseTls12, forLegacy: true,
+                    serverCertificateBase64: settings.ActiveLegacyCertificate,
+                    certificateTrustMode: settings.LegacyCertificateTrustMode))
                     .SendStreamingRequestAsync(userPrompt, onChunk, cancellationToken);
             return new CentralAiService(AiHttpTransport.GetClient(settings.UseTls12,
                     serverCertificateBase64: settings.ActiveCentralCertificate,

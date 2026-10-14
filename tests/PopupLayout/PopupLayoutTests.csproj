@@ -18,6 +18,10 @@
     <Reference Include="System.Xml" />
     <Compile Include="..\..\AiSettingsForm.cs" />
     <Compile Include="..\..\AiSettings.cs" />
+    <Compile Include="..\..\AiService.cs" />
+    <Compile Include="..\..\AiHttpTransport.cs" />
+    <Compile Include="..\..\CentralAiService.cs" />
+    <Compile Include="..\..\LegacyAiService.cs" />
     <Compile Include="..\..\AppConfig.cs" />
     <Compile Include="..\..\MailGeneration.cs" />
     <Compile Include="..\..\MailFormatting.cs" />
@@ -30,6 +34,12 @@
     <Compile Include="..\..\CertificateMaterial.cs" />
     <Compile Include="..\..\AiConnectionErrors.cs" />
     <Compile Include="PopupLayoutTests.cs" />
+    <Compile Include="RibbonSimulation.cs" />
+    <Compile Include="RibbonLayoutTests.cs" />
+    <Compile Include="..\..\AiRibbonLayout.cs" />
+    <Compile Include="..\..\AiMailRibbon.cs" />
+    <Compile Include="..\..\AiMailRibbon.Designer.cs" />
+    <Compile Include="..\..\AiInspectorRibbons.cs" />
     <Compile Include="..\..\ResponsiveTableLayoutPanel.cs" />
     <Compile Include="..\..\MailInputForm.cs" />
     <Compile Include="..\..\ProgressForm.cs" />

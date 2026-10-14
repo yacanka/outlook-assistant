@@ -7,7 +7,7 @@ msbuild tests/PopupLayout/PopupLayoutTests.csproj /t:Rebuild /verbosity:minimal
 & tests/PopupLayout/bin/PopupLayoutTests.exe
 ```
 
-Testler gerçek WinForms kontrollerini kullanır; Outlook veya VSTO gerektirmez. Mail giriş ve onay pencerelerini varsayılan, dar ve geniş boyutlarda, tekrar daraltıldığında ve %150 ölçekle kontrol eder. Boş konu doğrulaması, arka plan parçalarının canlı önizlemeye aktarılması, son parçanın hazır durumunda görünmesi, kısmi yanıtın onaylanamaması, hazır durumuna geçiş, gerçek ayarlar penceresinin iki sekmesi, servis adları, servis değişiminde token/sertifika alanlarının devre dışı kalması ve token’ın korunması, Kaydet/Vazgeç düğmeleri, iki sütunlu yerleşim, uzun kesintisiz metin ve açıklamanın değişmesi de kapsanır.
+Testler gerçek WinForms kontrollerini kullanır; Outlook veya VSTO gerektirmez. Mail giriş ve onay pencerelerini varsayılan, dar ve geniş boyutlarda, tekrar daraltıldığında ve %150 ölçekle kontrol eder. Boş konu doğrulaması, arka plan parçalarının canlı önizlemeye aktarılması, son parçanın hazır durumunda görünmesi, kısmi yanıtın onaylanamaması, hazır durumuna geçiş, gerçek ayarlar penceresinin sekmeleri, servis adları, servis değişiminde PLUS AI alanlarının gizlenmesi ve token’ın korunması, Kaydet/Vazgeç düğmeleri, iki sütunlu yerleşim, uzun kesintisiz metin ve açıklamanın değişmesi de kapsanır.
 
 macOS Mono'nun Carbon WinForms sürücüsü bu testleri çalıştırmak için uygun değildir. Derleme kontrolü görsel doğrulamanın yerine geçmez. Windows'ta ayrıca Outlook içinden üç popup'ı %100, %150 ve %200 ekran ölçeklerinde açın; pencereyi daraltıp genişletin, açıklamalar ile düğmelerin kırpılmadığını ve küçük yükseklikte dikey kaydırmayla erişilebilir olduğunu kontrol edin.
 
@@ -57,3 +57,20 @@ Windows DPAPI davranışı ayrıca Windows üzerinde doğrulanmalıdır.
 Arayüz kontrolleri Hafıza sekmesinin alanını, sayacını ve Temizle düğmesini
 kapsar. Windows'ta Enter ile yeni satır, uzun metin yapıştırma, Kaydet/Vazgeç,
 yeniden açma ve gerçek Outlook üretiminde kişisel üslup etkisini de doğrulayın.
+
+Yeni issue regresyonları: 0/1/çok modelde seçici/etiket görünürlüğü, tek modelin
+otomatik seçimi, Gelişmiş sekmesi, servise özel mod/sertifika taslaklarının
+korunması ve temizlemenin diğer servisi etkilememesi Windows GUI testlerindedir.
+Her iki servisi her sekmede dar/geniş boyutlarda ayrıca kontrol edin.
+
+`--settings-only` eski kayıtların preset/sertifika varsayılanlarını, iki
+servisin üç sertifika alanının kaydetme/yükleme döngüsünü ve gerçek üretim
+ribbon sınıflarını Office sınır simülasyonuyla çalıştırır. Preset düğmeleri,
+menü eylemleri/bağlamı, tüm pencere türleri, canlı güncelleme ve Close/Dispose
+abonelik temizliği doğrulanır. Bu simülasyon gerçek VSTO derlemesini veya
+Office XML önbelleğini doğrulamaz. Windows/Outlook'ta her iki preseti ana, okuma
+ve taslak pencerelerinde, Kaydet/Vazgeç ve yeniden açma ile kontrol edin.
+
+Gerçek `AiService` yönlendirmesi, her sağlayıcının üç modunda bozuk sertifika
+verisinin ağ çağrısından önce reddedildiğini de doğrular. Sentetik geçici ayar
+dosyaları kullanılır; testler kullanıcının kayıtlı ayarlarını değiştirmez.

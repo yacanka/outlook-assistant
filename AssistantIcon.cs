@@ -7,6 +7,7 @@ namespace Ask.ai
         // Process-lifetime resources are shared by the ribbons and popup windows.
         internal static readonly Icon WindowIcon = LoadIcon();
         internal static readonly Bitmap RibbonImage = CreateRibbonImage();
+        internal static readonly Bitmap LargeRibbonImage = WindowIcon.ToBitmap();
 
         private static Icon LoadIcon()
         {
