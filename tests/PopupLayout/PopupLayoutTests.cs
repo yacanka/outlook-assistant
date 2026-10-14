@@ -13,13 +13,18 @@ internal static class PopupLayoutTests
         CheckSettingsSelection();
         CheckMarkdownSettings();
         CheckMemorySettings();
+        CheckRibbonPresetSettings();
+        CheckProviderCertificates();
+        CheckCertificateRouting();
         CheckIconResources();
+        RibbonLayoutTests.Run();
         if (args.Length == 1 && args[0] == "--settings-only")
         {
-            Console.WriteLine("Settings checks passed (selection, Markdown, encrypted memory, length limits, corrupt records, embedded icon).");
+            Console.WriteLine("Settings checks passed (selection, provider certificate persistence/routing, presets, Markdown, encrypted memory, limits, corrupt records, embedded icon).");
             return;
         }
         Application.EnableVisualStyles();
+        CheckModelChoices();
         CheckSettingsForm();
         using (var input = new MailInputForm(false, true, "Örnek konu"))
         {
@@ -184,10 +189,104 @@ internal static class PopupLayoutTests
             "The same resource must provide a small ribbon image.");
     }
 
+    private static void CheckProviderCertificates()
+    {
+        string folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "askai-certificates-test-" + Guid.NewGuid().ToString("N"));
+        string path = System.IO.Path.Combine(folder, "settings.xml");
+        System.IO.Directory.CreateDirectory(folder);
+        try
+        {
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Legacy</Provider>" +
+                "<CentralServerCertificate>central-server</CentralServerCertificate><CentralCertificateTrustMode>CertificateAuthority</CentralCertificateTrustMode>" +
+                "<LegacyServerCertificate>legacy-server</LegacyServerCertificate><LegacyCaCertificates>legacy-ca</LegacyCaCertificates>" +
+                "<LegacyBundleCertificates>legacy-bundle</LegacyBundleCertificates><LegacyCertificateTrustMode>CertificateBundle</LegacyCertificateTrustMode></AiSettings>");
+            Askai.AiSettings.Load(path).Save(path);
+            var saved = System.Xml.Linq.XElement.Load(path);
+            Check((string)saved.Element("LegacyBundleCertificates") == "legacy-bundle"
+                && (string)saved.Element("LegacyCaCertificates") == "legacy-ca"
+                && (string)saved.Element("LegacyServerCertificate") == "legacy-server"
+                && (string)saved.Element("LegacyCertificateTrustMode") == "CertificateBundle",
+                "Each legacy certificate mode survives reload and save.");
+            Check((string)saved.Element("CentralServerCertificate") == "central-server"
+                && (string)saved.Element("CentralCertificateTrustMode") == "CertificateAuthority",
+                "Saving legacy certificates preserves the original PLUS AI certificate keys.");
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Legacy</Provider></AiSettings>");
+            Askai.AiSettings.Load(path).Save(path);
+            saved = System.Xml.Linq.XElement.Load(path);
+            Check((string)saved.Element("LegacyServerCertificate") == ""
+                && (string)saved.Element("LegacyCertificateTrustMode") == "ServerCertificate",
+                "Old legacy settings use system trust and retain the secure certificate mode default.");
+        }
+        finally { System.IO.Directory.Delete(folder, true); }
+    }
+
+    private static void CheckRibbonPresetSettings()
+    {
+        string folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "askai-preset-test-" + Guid.NewGuid().ToString("N"));
+        string path = System.IO.Path.Combine(folder, "settings.xml");
+        System.IO.Directory.CreateDirectory(folder);
+        try
+        {
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider></AiSettings>");
+            Askai.AiSettings.Load(path).Save(path);
+            Check((string)System.Xml.Linq.XElement.Load(path).Element("RibbonPreset") == "Standard",
+                "Old settings use the original ribbon layout.");
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Legacy</Provider><RibbonPreset>RepliesMenu</RibbonPreset></AiSettings>");
+            Askai.AiSettings.Load(path).Save(path);
+            Check((string)System.Xml.Linq.XElement.Load(path).Element("RibbonPreset") == "RepliesMenu",
+                "The selected ribbon layout survives reload and save independently of the provider.");
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider><RibbonPreset>999</RibbonPreset></AiSettings>");
+            Askai.AiSettings.Load(path).Save(path);
+            Check((string)System.Xml.Linq.XElement.Load(path).Element("RibbonPreset") == "Standard",
+                "An unknown preset safely falls back to the original layout.");
+        }
+        finally { System.IO.Directory.Delete(folder, true); }
+    }
+
+    private static void CheckCertificateRouting()
+    {
+        string centralUrl = Askai.AppConfig.CentralApiUrl;
+        string legacyUrl = Askai.AppConfig.ApiUrl;
+        // An accidentally bypassed certificate must still be unable to reach a network endpoint.
+        Askai.AppConfig.CentralApiUrl = "invalid";
+        Askai.AppConfig.ApiUrl = "invalid";
+        try
+        {
+            foreach (Askai.AiProvider provider in Enum.GetValues(typeof(Askai.AiProvider)))
+            foreach (Askai.CertificateTrustMode mode in Enum.GetValues(typeof(Askai.CertificateTrustMode)))
+            {
+                var settings = new Askai.AiSettings { Provider = provider,
+                    CentralCertificateTrustMode = mode, LegacyCertificateTrustMode = mode };
+                if (provider == Askai.AiProvider.Central)
+                {
+                    if (mode == Askai.CertificateTrustMode.ServerCertificate) settings.CentralServerCertificate = "invalid";
+                    else if (mode == Askai.CertificateTrustMode.CertificateAuthority) settings.CentralCaCertificates = "invalid";
+                    else settings.CentralBundleCertificates = "invalid";
+                }
+                else
+                {
+                    if (mode == Askai.CertificateTrustMode.ServerCertificate) settings.LegacyServerCertificate = "invalid";
+                    else if (mode == Askai.CertificateTrustMode.CertificateAuthority) settings.LegacyCaCertificates = "invalid";
+                    else settings.LegacyBundleCertificates = "invalid";
+                }
+                bool rejected = false;
+                try
+                {
+                    var task = new Askai.AiService().SendStreamingRequestAsync("synthetic", null, CancellationToken.None, settings);
+                    if (task.IsFaulted) { var ignored = task.Exception; }
+                }
+                catch (Askai.AiServiceException) { rejected = true; }
+                Check(rejected, "The selected " + provider + " " + mode + " certificate is validated before transport starts.");
+            }
+        }
+        finally { Askai.AppConfig.CentralApiUrl = centralUrl; Askai.AppConfig.ApiUrl = legacyUrl; }
+    }
+
     private static void CheckSettingsForm()
     {
         using (var settings = new Askai.AiSettingsForm())
         {
+            settings.Show();
             var provider = (ComboBox)FindControl(settings, "ServiceProvider");
             var token = (TextBox)FindControl(settings, "AccessToken");
             var clearToken = FindControl(settings, "ClearToken");
@@ -213,15 +312,38 @@ internal static class PopupLayoutTests
             Check(token.UseSystemPasswordChar, "The token remains masked.");
             provider.SelectedIndex = 1;
             Check(markdown.Enabled && markdown.Checked, "Markdown preference applies independently of the provider.");
-            Check(!token.Enabled && !clearToken.Enabled && !certificateMode.Enabled,
-                "TAB 3.2 must not allow editing or clearing PLUS AI credentials and trust settings.");
+            Check(!token.Visible && !clearToken.Visible && !FindControl(settings, "PlusAiAccess").Visible,
+                "TAB 3.2 hides the complete PLUS AI credentials section.");
+            Check(certificateMode.Enabled, "Both services allow their own certificate settings.");
             provider.SelectedIndex = 0;
             Check(token.Enabled && clearToken.Enabled && certificateMode.Enabled
                 && token.Text == "synthetic-ui-fixture", "Switching services preserves PLUS AI credentials.");
             Check(settings.AcceptButton != null && settings.CancelButton != null,
                 "Settings support keyboard save and cancel.");
             var tabs = (TabControl)FindControl(settings, "SettingsTabs");
-            settings.Show();
+            Check(tabs.TabPages[1].Text == "Gelişmiş", "Certificate settings use the Advanced tab.");
+            tabs.SelectedIndex = 1;
+            var modes = (ComboBox)certificateMode;
+            var setCertificate = typeof(Askai.AiSettingsForm).GetMethod("SetCurrentCertificateData",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var currentCertificate = typeof(Askai.AiSettingsForm).GetProperty("CurrentCertificateData",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            modes.SelectedIndex = 0;
+            setCertificate.Invoke(settings, new object[] { "synthetic-central-certificate" });
+            provider.SelectedIndex = 1;
+            modes.SelectedIndex = 1;
+            setCertificate.Invoke(settings, new object[] { "synthetic-legacy-ca" });
+            provider.SelectedIndex = 0;
+            Check(modes.SelectedIndex == 0 && (string)currentCertificate.GetValue(settings) == "synthetic-central-certificate",
+                "Switching back restores the PLUS AI mode and certificate draft.");
+            provider.SelectedIndex = 1;
+            Check(modes.SelectedIndex == 1 && (string)currentCertificate.GetValue(settings) == "synthetic-legacy-ca",
+                "Switching back restores the TAB 3.2 mode and certificate draft.");
+            ((Button)FindControl(settings, "ClearCertificate")).PerformClick();
+            Check((string)currentCertificate.GetValue(settings) == "", "Clear empties only the active service and mode.");
+            provider.SelectedIndex = 0;
+            Check((string)currentCertificate.GetValue(settings) == "synthetic-central-certificate", "Clearing TAB trust preserves PLUS AI trust.");
+            Check(FindControl(settings, "RibbonPreset") is ComboBox, "The ribbon layout is selectable in settings.");
             tabs.SelectedTab = (TabPage)memory.Parent.Parent;
             memory.Text = "Synthetic context";
             ((Button)FindControl(settings, "ClearMemory")).PerformClick();
@@ -244,6 +366,39 @@ internal static class PopupLayoutTests
             }
             settings.Close();
         }
+    }
+
+    private static void CheckModelChoices()
+    {
+        var originalModels = Askai.AppConfig.CentralModels;
+        try
+        {
+            foreach (var models in new[] { new string[0], new[] { "only-model" }, new[] { "first-model", "second-model" } })
+            {
+                Askai.AppConfig.CentralModels = models;
+                using (var settings = new Askai.AiSettingsForm())
+                {
+                    settings.Show();
+                    ((ComboBox)FindControl(settings, "ServiceProvider")).SelectedIndex = 0;
+                    var selector = (ComboBox)FindControl(settings, "Model");
+                    Check(selector.Visible == (models.Length > 1), "Model choices are shown only for multiple models.");
+                    Check(FindControl(settings, "ModelLabel").Visible == selector.Visible, "Hidden model choices leave no orphan label.");
+                    if (models.Length == 1)
+                        Check((string)selector.SelectedItem == "only-model", "The single model is selected even when its field is hidden.");
+                    var tabs = (TabControl)FindControl(settings, "SettingsTabs");
+                    tabs.SelectedIndex = 1;
+                    var service = (ComboBox)FindControl(settings, "ServiceProvider");
+                    service.SelectedIndex = 1;
+                    service.SelectedIndex = 0;
+                    tabs.SelectedIndex = 0;
+                    Check(selector.Visible == (models.Length > 1)
+                        && FindControl(settings, "ModelLabel").Visible == selector.Visible,
+                        "Switching services on another tab preserves model and label visibility.");
+                    settings.Close();
+                }
+            }
+        }
+        finally { Askai.AppConfig.CentralModels = originalModels; }
     }
 
     private static Control FindControl(Control parent, string name)

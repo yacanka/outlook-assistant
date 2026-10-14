@@ -67,7 +67,14 @@ internal static class ServerCertificateTests
             Check(!ReferenceEquals(pinned, AiHttpTransport.GetClient(true, serverCertificateBase64: encoded)), "TLS modes keep independent certificate pools");
             Check(!ReferenceEquals(pinned, AiHttpTransport.GetClient(false,
                 serverCertificateBase64: Convert.ToBase64String(rotated.Export(X509ContentType.Cert)))), "certificate rotation gets a new pool");
-            Throws<AiServiceException>(() => AiHttpTransport.GetClient(false, forLegacy: true, serverCertificateBase64: encoded));
+            var legacyPinned = AiHttpTransport.GetClient(false, forLegacy: true, serverCertificateBase64: encoded);
+            Check(ReferenceEquals(legacyPinned, AiHttpTransport.GetClient(false, forLegacy: true, serverCertificateBase64: encoded)),
+                "legacy certificate pool is reused");
+            Check(!ReferenceEquals(pinned, legacyPinned), "providers isolate certificate pools even with identical certificates");
+            Check(!ReferenceEquals(legacyPinned, AiHttpTransport.GetClient(true, forLegacy: true, serverCertificateBase64: encoded)),
+                "legacy TLS modes isolate certificate pools");
+            Check(!ReferenceEquals(legacyPinned, AiHttpTransport.GetClient(false, forLegacy: true)),
+                "clearing the legacy certificate restores system trust");
             Throws<AiServiceException>(() => ServerCertificateTrust.FromBase64("not a certificate"));
             // Valid empty PKCS#12 envelope: reject containers before importing any keys.
             // Public test certificates never need a macOS temporary private-key keychain.

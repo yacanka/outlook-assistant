@@ -8,6 +8,9 @@ URL credential, query veya fragment içeremez. Token'ı kaynak koda koymayın.
 Outlook şeridindeki **Ayarlar** üzerinden PLUS AI/TAB 3.2, PLUS AI model
 ve PLUS AI token ayarlanır. İlk kurulumda PLUS AI seçilidir. Liste doluysa
 ayarlar penceresi ilk modeli önerir; Kaydet ile seçimi kalıcılaştırın.
+Model seçici yalnız birden çok model tanımlandığında gösterilir. Tek model
+gizli alanda otomatik seçilir ve Kaydet ile saklanır; boş listede servis
+yapılandırmasının eksik olduğunu bildiren mevcut doğrulama korunur.
 Token alanını temizleyip Kaydet'e basmak kayıtlı token'ı siler. İptal/çarpı
 kaydetmez. Eksik PLUS AI yapılandırması çağrıdan önce anlaşılır hata verir.
 
@@ -89,7 +92,7 @@ sertifika doğrulamasını veya host'un genel TLS ayarını değiştirmek 405'i 
 
 ### PowerShell gerektirmeyen TLS uyumluluk denemesi
 
-**Ayarlar → Bağlantı ve sertifika → TLS 1.2 uyumluluk modu → Kaydet** ile sonraki AI isteğinde TLS 1.2
+**Ayarlar → Gelişmiş → TLS 1.2 uyumluluk modu → Kaydet** ile sonraki AI isteğinde TLS 1.2
 denenebilir. Varsayılan kapalıdır; eski ayar kayıtlarında alan yoksa kapalı kabul
 edilir. PLUS AI ve TAB 3.2 HTTPS bağlantılarına uygulanır. Token, model ve istek
 formatı değişmez. Yeniden başlatma gerekmez; mod değişince farklı bağlantı havuzu
@@ -113,9 +116,9 @@ açmayı, eski ayar kaydını yüklemeyi, modu kapatmayı ve gerçek API çağr�
 doğrulayın. DPAPI ayar kaydı, VSTO arayüzü ve gerçek TLS el sıkışması bu macOS
 test ortamında doğrulanmaz.
 
-### Manuel PLUS AI sertifika güveni
+### Servis bazlı manuel sertifika güveni
 
-**Ayarlar → Bağlantı ve sertifika → Sertifika modu → Sertifika seç… → Kaydet** üzerinden üç
+**Ayarlar → Gelişmiş → Sertifika modu → Sertifika seç… → Kaydet** üzerinden üç
 ayrı mod kullanılabilir:
 
 - **CA zincirine güven:** Yalnızca kök ve isteğe bağlı ara CA sertifikaları seçilir.
@@ -139,7 +142,7 @@ ayrı mod kullanılabilir:
   değişmez. Windows/OpenSSL zincir oluşturma farklılıkları nedeniyle Python ile
   her ortamda birebir aynı sonucu vereceği garanti edilmez.
 
-Python'da çalışan kök + ara + sunucu paketinizi kullanmak için **Ayarlar → Bağlantı ve sertifika →
+Python'da çalışan kök + ara + sunucu paketinizi kullanmak için **Ayarlar → Gelişmiş →
 Sertifika modu → Sertifika paketi (CRL/OCSP kapalı) → Sertifika seç… →
 Kaydet** adımlarını izleyin. PEM içerikli `.cer/.crt` dosyasını seçin. Paket bu
 moda özel saklanır; diğer modlarda daha önce yüklenen dosyalar otomatik taşınmaz.
@@ -161,14 +164,20 @@ sunucudan veya Windows zincir oluşturucusundan tamamlanabilir. Oluşan zincir
 mutlaka yüklenen kökte sonlanmalıdır. Alternatif/cross-signed yolların Windows
 başka bir kökte sonlandırdığı durumlar da güvenli biçimde reddedilir.
 
-Her modun sertifikaları ayrı saklanır. Mod değiştirmek diğer modun sertifikalarını
-silmez veya yeniden yorumlamaz. **Temizle → Kaydet** yalnızca seçili modu temizler;
+Önce **Servis** sekmesinden PLUS AI veya TAB 3.2 seçin. **Gelişmiş** sekmesindeki
+sertifikalar bu servise aittir. Her servisin modu ve üç modun sertifikaları ayrı
+saklanır. Servis/mod değiştirmek diğer sertifikaları silmez veya yeniden yorumlamaz.
+**Temizle → Kaydet** yalnızca seçili servisin seçili modunu temizler;
 aktif modda sertifika yoksa normal Windows doğrulaması kullanılır. Arayüz zincir
 sayısını, kök adını ve SHA-256 parmak izini gösterir. Kaydet açık sertifika verisini
 saklar; dosya yolu veya özel anahtar kaydedilmez. Token'ın DPAPI şifrelemesi
 korunur. Dosyayı sonradan değiştirmek kaydı değiştirmez; yeni dosyalar yeniden
 seçilmelidir. İptal/pencereyi kapatma değişiklikleri kaydetmez. Eski ayar kayıtları
-sunucu modunda açılır. TAB 3.2 bu sertifika ayarlarını kullanmaz.
+sunucu modunda açılır. Eski PLUS AI anahtarları korunur; TAB 3.2 sertifikaları
+`LegacyServerCertificate`, `LegacyCaCertificates`, `LegacyBundleCertificates` ve
+`LegacyCertificateTrustMode` alanlarında saklanır. Sertifika güveni HTTPS
+bağlantısına uygulanır; TAB 3.2 HTTP adresi otomatik olarak HTTPS’e çevrilmez.
+Her servisin sertifika/TLS bağlantı havuzu ayrıdır; token ve cookie durumu paylaşılmaz.
 
 Seçim sırasında zincirin yapısı ve imzaları iptal servisine ihtiyaç olmadan
 kontrol edilir. Native zincir oluşturucusu AIA sorgusu yapabilir; erişilemeyen
@@ -341,16 +350,24 @@ Windows üzerinde Visual Studio'nun **Office/SharePoint development** araçları
 
 Eklenti Outlook ve kurulum ekranlarında **AI Asistan** adıyla görünür. Servis
 seçenekleri **PLUS AI** ve **TAB 3.2** olarak gösterilir; hata mesajları da bu
-adları kullanır. Ana şeritte **Mail Hazırla** büyük, **Yanıtla** ve **Tümünü
-Yanıtla** küçük düğmelerdir. Okuma penceresinde **Yanıtla**, düzenleme
-penceresinde **Metni İyileştir** öne çıkar. **Ayarlar**, **Tercihler** grubunda
-bulunur.
+adları kullanır. **Ayarlar**, her pencerede **AI Asistan** grubunda bulunur.
+**Ayarlar → Mail biçimlendirme → Şerit düzeni** iki seçenek sunar:
+
+- **1 — Ayrı yanıt düğmeleri:** Ana şeritte Mail Hazırla büyük; Yanıtla,
+  Tümünü Yanıtla ve Ayarlar küçüktür. Varsayılan ve eski ayarların düzenidir.
+- **2 — Yanıt menüsü, büyük düğmeler:** Ana şeritte Mail Hazırla, oklu
+  Yanıtla menüsü ve Ayarlar büyük görünür. Menüde Yanıtla/Tümünü Yanıtla vardır.
+
+Seçim `RibbonPreset` alanında saklanır. Kaydet açık pencerelerin şeritlerini
+günceller; Vazgeç uygulamaz. Okuma penceresi yanıt yeteneklerini, taslak
+penceresi Metni İyileştir yeteneğini korur; ikisinde de Ayarlar aynı gruptadır.
 
 Ayarlar penceresinin **Servis** sekmesinde servis, PLUS AI modeli ve token;
-**Bağlantı ve sertifika** sekmesinde TLS ve PLUS AI sertifika ayarları bulunur.
+**Gelişmiş** sekmesinde TLS ve seçili servisin sertifika ayarları bulunur.
 **Kaydet** ve **Vazgeç** düğmeleri kaydırılan alanın dışında kalır. TAB 3.2
-seçildiğinde PLUS AI alanları ve token silme düğmesi devre dışı kalır; mevcut
-değerler korunur. Enter kaydeder, Escape değişiklikleri kaydetmeden kapatır.
+seçildiğinde PLUS AI erişim bölümü gizlenir; mevcut model/token değerleri
+korunur. Pencere varsayılan 520×480 boyutundadır; küçük yüksekliklerde sekme
+içeriği kaydırılır ve Kaydet/Vazgeç düğmeleri erişilebilir kalır. Enter kaydeder, Escape değişiklikleri kaydetmeden kapatır.
 
 Mevcut kurulum ve ayarların uyumluluğu için assembly/namespace, proje dosya
 adı, sağlayıcı enum değerleri (`Central`/`Legacy`), `AppConfig` alanları ve

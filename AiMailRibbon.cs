@@ -25,20 +25,7 @@ namespace Ask.ai
             grpAiAssistant.Items.Insert(0, compose);
             btnAiReply.SuperTip = "Seçili mail için yanıt hazırlar. Onayınızdan sonra Outlook yanıt taslağını açar; mail göndermez.";
             btnAiReplyAll.SuperTip = "Seçili mail için tümünü yanıtla taslağı hazırlar. Aktarım için onayınızı bekler; mail göndermez.";
-            var settings = Factory.CreateRibbonButton();
-            settings.Label = "Ayarlar";
-            settings.Name = "btnAiSettings";
-            settings.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
-            settings.Image = AssistantIcon.RibbonImage;
-            settings.ShowImage = true;
-            settings.ScreenTip = "AI Asistan ayarları";
-            settings.SuperTip = "Servis, model, token ve bağlantı ayarlarını düzenleyin.";
-            settings.Click += (sender, args) => { using (var dialog = new AiSettingsForm()) dialog.ShowDialog(); };
-            var preferences = Factory.CreateRibbonGroup();
-            preferences.Name = "grpAiPreferences";
-            preferences.Label = "Tercihler";
-            preferences.Items.Add(settings);
-            tabMail.Groups.Add(preferences);
+            new AiRibbonLayout(this, grpAiAssistant, btnAiReply, btnAiReplyAll);
         }
 
         private async void btnAiReply_Click(object sender, RibbonControlEventArgs e)
