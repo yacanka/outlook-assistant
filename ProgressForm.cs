@@ -33,8 +33,17 @@ namespace Ask.ai
         private readonly bool supportsRichText;
         private bool previewFailed;
         private int receivedCharacters;
+        private int queuedCharacters;
         private bool finished;
         private bool applying;
+        private Task<FormattedMailContent> previewRendering;
+        private int renderingVersion;
+        private int renderedVersion = -1;
+        private int renderingWidth;
+        private bool plainStreaming;
+        private bool completing;
+        private bool ready;
+        internal FormattedMailContent PreparedContent { get; private set; }
 
         public ProgressForm(CancellationTokenSource cancellation, string title, string approvalMessage, bool applyMarkdown = false, bool supportsRichText = true)
         {
@@ -105,13 +114,16 @@ namespace Ask.ai
                     return;
                 }
                 int count = receivedCharacters;
-                if (count > 0) status.Text = "İçerik hazırlanıyor… (" + count + " karakter alındı)";
+                if (count > 0 && !completing) status.Text = "İçerik hazırlanıyor… (" + count + " karakter alındı)";
             };
             statusTimer.Start();
             preview.SizeChanged += (sender, args) =>
             {
-                if (!applyMarkdown || !supportsRichText || previewFailed || previewBuffer.Source.Length == 0) return;
-                try { RenderPreview(); }
+                if (!applyMarkdown || !supportsRichText || previewFailed || previewBuffer.Length == 0
+                    || (completing && !ready) || (ready && PreparedContent.Rtf.Length > MailContentLimits.LiveRtfCharacters)) return;
+                renderedVersion = -1;
+                if (ready) statusTimer.Start();
+                try { PumpPreviewRendering(); }
                 catch (Exception) { FailPreview(); }
             };
         }
@@ -128,7 +140,13 @@ namespace Ask.ai
         public void ReportChunk(string chunk)
         {
             if (string.IsNullOrEmpty(chunk)) return;
-            lock (chunkLock) pendingText.Append(chunk);
+            lock (chunkLock)
+            {
+                if (chunk.Length > MailContentLimits.GeneratedCharacters - queuedCharacters)
+                    throw new MailActionException("AI yanıtı 64.000 karakter sınırını aşıyor. Mail değiştirilmedi.");
+                queuedCharacters += chunk.Length;
+                pendingText.Append(chunk);
+            }
         }
 
         private void FlushPreview()
@@ -136,16 +154,66 @@ namespace Ask.ai
             string text;
             lock (chunkLock)
             {
-                if (pendingText.Length == 0) return;
                 text = pendingText.ToString();
                 pendingText.Clear();
             }
-            receivedCharacters += text.Length;
-            previewBuffer.Append(text);
-            RenderPreview();
+            string delta = previewBuffer.Append(text);
+            receivedCharacters = previewBuffer.Length;
+            if (!applyMarkdown || plainStreaming)
+            {
+                if (delta.Length > 0) UpdatePreview(() => preview.AppendText(delta));
+            }
+            else if (previewBuffer.Length > MailContentLimits.LivePreviewCharacters)
+            {
+                SwitchToPlainStreaming();
+            }
+            PumpPreviewRendering();
         }
 
-        private void RenderPreview()
+        private int TableWidth => Math.Max(1440, (preview.ClientSize.Width - 16) * 1440 / preview.DeviceDpi);
+
+        private void SwitchToPlainStreaming()
+        {
+            plainStreaming = true;
+            UpdatePreview(() => preview.Text = MailText.ForPreview(previewBuffer.Source));
+        }
+
+        private void PumpPreviewRendering()
+        {
+            if (previewRendering != null && previewRendering.IsCompleted)
+            {
+                var content = previewRendering.GetAwaiter().GetResult();
+                previewRendering = null;
+                if ((!completing || ready) && !plainStreaming && renderingVersion == previewBuffer.Version && renderingWidth == TableWidth)
+                {
+                    if (!ready && content.Rtf.Length > MailContentLimits.LiveRtfCharacters) SwitchToPlainStreaming();
+                    else ShowContent(content);
+                    renderedVersion = renderingVersion;
+                }
+            }
+            if (ready && previewRendering == null && renderedVersion == previewBuffer.Version) statusTimer.Stop();
+            if ((completing && !ready) || plainStreaming || !applyMarkdown || previewBuffer.Length == 0
+                || previewRendering != null || renderedVersion == previewBuffer.Version) return;
+            string source = previewBuffer.Source;
+            renderingVersion = previewBuffer.Version;
+            renderingWidth = TableWidth;
+            int width = renderingWidth;
+            previewRendering = Task.Run(() => MailFormatting.Create(source, true, width));
+            // The form may close before the next timer tick can observe a formatting failure.
+            previewRendering.ContinueWith(task => { var error = task.Exception; },
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+        }
+
+        private void ShowContent(FormattedMailContent content)
+        {
+            UpdatePreview(() =>
+            {
+                if (supportsRichText) preview.Rtf = content.Rtf;
+                else preview.Text = MailText.ForPreview(content.PlainText);
+            });
+        }
+
+        private void UpdatePreview(Action update)
         {
             int selectionStart = preview.SelectionStart;
             int selectionLength = preview.SelectionLength;
@@ -154,14 +222,7 @@ namespace Ask.ai
             Point endPosition = preview.GetPositionFromCharIndex(preview.TextLength);
             bool followEnd = selectionStart + selectionLength >= preview.TextLength
                 && (preview.TextLength == 0 || (endPosition.Y >= 0 && endPosition.Y < preview.ClientSize.Height));
-            if (applyMarkdown)
-            {
-                int tableWidth = Math.Max(1440, (preview.ClientSize.Width - 16) * 1440 / preview.DeviceDpi);
-                var content = MailFormatting.Create(previewBuffer.Source, true, tableWidth);
-                if (supportsRichText) preview.Rtf = content.Rtf;
-                else preview.Text = MailText.ForPreview(content.PlainText);
-            }
-            else preview.Text = MailText.ForPreview(previewBuffer.Source);
+            update();
             if (followEnd)
             {
                 preview.Select(preview.TextLength, 0);
@@ -181,22 +242,70 @@ namespace Ask.ai
 
         public void SetReady(string result)
         {
-            if (IsDisposed || cancellation.IsCancellationRequested) return;
+            // Retained for synchronous callers. The Outlook workflow uses SetReadyAsync so
+            // parsing never blocks the host UI while a response completes.
+            if (!BeginCompletion(result)) return;
+            var content = applyMarkdown ? FormatCompletedPreview(previewBuffer.Source, TableWidth) : null;
+            CompletePreview(content == null ? null : content.Item2, content == null ? null : content.Item1);
+        }
+
+        public async Task SetReadyAsync(string result)
+        {
+            if (!BeginCompletion(result)) return;
+            string source = previewBuffer.Source;
+            int width = TableWidth;
+            if (previewRendering != null) await previewRendering;
+            cancellation.Token.ThrowIfCancellationRequested();
+            var content = applyMarkdown
+                ? await Task.Run(() => FormatCompletedPreview(source, width), cancellation.Token)
+                : null;
+            if (IsDisposed) return;
+            cancellation.Token.ThrowIfCancellationRequested();
+            CompletePreview(content == null ? null : content.Item2, content == null ? null : content.Item1);
+        }
+
+        private static Tuple<FormattedMailContent, FormattedMailContent> FormatCompletedPreview(string source, int width)
+        {
+            var transfer = MailFormatting.Create(source, true);
+            // Window resizing must not change the established table width in the Outlook draft.
+            var display = width == 8640 || !transfer.Rtf.Contains("\\trowd")
+                ? transfer : MailFormatting.Create(source, true, width);
+            return Tuple.Create(transfer, display);
+        }
+
+        private bool BeginCompletion(string result)
+        {
+            if (IsDisposed || cancellation.IsCancellationRequested) return false;
+            completing = true;
             statusTimer.Stop();
             if (previewFailed) throw new MailActionException("Önizleme biçimlendirilemedi. Mail değiştirilmedi.");
             FlushPreview();
-            if (applyMarkdown) MailFormatting.Create(result ?? previewBuffer.Source, true).EnsureVisibleText();
             // The completed provider result is authoritative, even if callbacks omitted a final fragment.
-            if (result != null)
+            if (result != null) previewBuffer.Replace(result);
+            status.Text = "İçerik alındı; önizleme hazırlanıyor…";
+            return true;
+        }
+
+        private void CompletePreview(FormattedMailContent content, FormattedMailContent transferContent)
+        {
+            previewRendering = null;
+            renderedVersion = previewBuffer.Version;
+            plainStreaming = false;
+            if (content != null)
             {
-                previewBuffer.Replace(result);
-                RenderPreview();
+                content.EnsureVisibleText();
+                PreparedContent = transferContent;
+                ShowContent(content);
             }
+            else UpdatePreview(() => preview.Text = MailText.ForPreview(previewBuffer.Source));
             progress.Style = ProgressBarStyle.Continuous;
             progress.Value = 100;
             status.Text = "İçerik hazır. Mail’e aktarmak için onayınız bekleniyor.";
+            if (content != null && content.UsedPlainTextFallback)
+                status.Text += " Biçimlendirme sınırı nedeniyle içerik kesilmeden düz metin olarak gösteriliyor ve aktarılacak.";
             cancel.Text = "&Vazgeç";
             apply.Enabled = true;
+            ready = true;
             // No default AcceptButton: finishing generation must not turn an accidental Enter into approval.
         }
 

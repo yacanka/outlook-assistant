@@ -26,7 +26,7 @@ internal static class MailFormattingTests
             "preview preserves every kind of line break");
         var stream = new MailPreviewBuffer();
         Check(stream.Append("First\r") == "First\r\n", "standalone CR is visible immediately");
-        Check(stream.Append("\n\nSecond") == "First\r\n\r\nSecond", "split CRLF is not doubled");
+        Check(stream.Append("\n\nSecond") == "\r\nSecond", "stream returns only new visible text and does not double a split CRLF");
         Check(stream.Source == "First\r\n\nSecond", "stream retains unmodified source");
 
         var formatted = MailFormatting.Create("# Başlık\n\n**Kalın** ve *italik* ve ~~sil~~\nAlt satır", true);

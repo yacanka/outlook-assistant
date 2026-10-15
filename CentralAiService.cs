@@ -67,6 +67,7 @@ namespace Askai
                 {
                     throw AiConnectionErrors.FromTransport(AiBrand.PlusAi, ex, request);
                 }
+                catch (DecoderFallbackException) { throw InvalidStream(); }
             }
         }
 
@@ -77,8 +78,9 @@ namespace Askai
             var line = new StringBuilder();
             var data = new StringBuilder();
             var buffer = new byte[4096];
-            var chars = new char[4096];
-            var decoder = new UTF8Encoding(false, true).GetDecoder();
+            var encoding = new UTF8Encoding(false, true);
+            var chars = new char[encoding.GetMaxCharCount(buffer.Length)];
+            var decoder = encoding.GetDecoder();
             int total = 0;
             while (true)
             {
@@ -98,7 +100,13 @@ namespace Askai
                         data.Clear();
                         if (json == "[DONE]") return result.ToString();
                         string chunk = ParseChunk(json);
-                        if (!string.IsNullOrEmpty(chunk)) { result.Append(chunk); onChunk?.Invoke(chunk); }
+                        if (!string.IsNullOrEmpty(chunk))
+                        {
+                            if (chunk.Length > MailContentLimits.GeneratedCharacters - result.Length)
+                                throw new AiServiceException("AI yanıtı 64.000 karakter sınırını aşıyor. Daha kısa bir içerik isteyin; mail değiştirilmedi.");
+                            result.Append(chunk);
+                            onChunk?.Invoke(chunk);
+                        }
                     }
                     else if (value.StartsWith("data:", StringComparison.Ordinal))
                         data.Append(value.Substring(5).TrimStart(' ')).Append('\n');

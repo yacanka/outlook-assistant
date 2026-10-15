@@ -71,8 +71,9 @@ namespace Askai
         {
             var parser = new ResponseStream(onChunk);
             var buffer = new byte[4096];
-            var chars = new char[4096];
-            var decoder = new UTF8Encoding(false, true).GetDecoder();
+            var encoding = new UTF8Encoding(false, true);
+            var chars = new char[encoding.GetMaxCharCount(buffer.Length)];
+            var decoder = encoding.GetDecoder();
             var line = new StringBuilder();
             int total = 0;
             while (true)
@@ -105,6 +106,9 @@ namespace Askai
             private readonly StringBuilder pendingJson = new StringBuilder();
             private readonly Action<string> onChunk;
             private bool requiresCompletion;
+            private int jsonDepth;
+            private bool jsonString;
+            private bool jsonEscape;
             public string Result => result.ToString();
             public ResponseStream(Action<string> onChunk) { this.onChunk = onChunk; }
 
@@ -140,31 +144,44 @@ namespace Askai
             private bool AppendJson(string line)
             {
                 pendingJson.Append(line).Append('\n');
-                string payload = pendingJson.ToString();
+                // Frame records in one pass. Parsing the entire prefix on each physical line is quadratic.
+                foreach (char value in line)
+                {
+                    if (jsonString)
+                    {
+                        if (jsonEscape) jsonEscape = false;
+                        else if (value == '\\') jsonEscape = true;
+                        else if (value == '"') jsonString = false;
+                    }
+                    else if (value == '"') jsonString = true;
+                    else if (value == '{' || value == '[') { if (++jsonDepth > 64) throw InvalidStream(); }
+                    else if (value == '}' || value == ']') { if (--jsonDepth < 0) throw InvalidStream(); }
+                }
+                if (jsonString) throw InvalidStream(); // Literal newlines are not valid inside JSON strings.
+                if (jsonDepth != 0) return false;
                 try
                 {
-                    var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(payload), false, default);
-                    JsonDocument document;
-                    if (!JsonDocument.TryParseValue(ref reader, out document)) return false;
-                    using (document)
+                    using (var document = JsonDocument.Parse(pendingJson.ToString()))
                     {
+                        pendingJson.Clear();
                         JsonElement done;
                         if (document.RootElement.ValueKind != JsonValueKind.Object) throw InvalidStream();
                         if (document.RootElement.TryGetProperty("done", out done)) requiresCompletion = !done.GetBoolean();
+                        bool completed;
+                        AppendText(ParsePayload(document.RootElement, out completed));
+                        return completed;
                     }
                 }
                 catch (JsonException) { throw InvalidStream(); }
                 catch (InvalidOperationException) { throw InvalidStream(); }
-                pendingJson.Clear();
-                bool completed;
-                AppendText(ParsePayload(payload, out completed));
-                return completed;
             }
 
             private void AppendText(string chunk)
             {
                 if (string.IsNullOrEmpty(chunk)) return;
                 chunk = chunk.Replace("\\r\\n", "\r\n").Replace("\\n", "\n").Replace("\\r", "\r");
+                if (chunk.Length > MailContentLimits.GeneratedCharacters - result.Length)
+                    throw new AiServiceException("AI yanıtı 64.000 karakter sınırını aşıyor. Daha kısa bir içerik isteyin; mail değiştirilmedi.");
                 result.Append(chunk);
                 onChunk?.Invoke(chunk);
             }
@@ -178,29 +195,25 @@ namespace Askai
             }
         }
 
-        private static string ParsePayload(string json, out bool completed)
+        private static string ParsePayload(JsonElement root, out bool completed)
         {
             completed = false;
             try
             {
-                using (var document = JsonDocument.Parse(json))
-                {
-                    var root = document.RootElement;
-                    JsonElement value;
-                    if (root.TryGetProperty("error", out value)) throw InvalidStream();
-                    if (root.TryGetProperty("done_reason", out value) && value.ValueKind != JsonValueKind.Null
-                        && value.GetString() != "stop") throw InvalidStream();
-                    bool hasDone = root.TryGetProperty("done", out value);
-                    if (hasDone) completed = value.GetBoolean();
-                    JsonElement choices;
-                    if (root.TryGetProperty("choices", out choices))
-                        return ParseChoice(choices, ref completed);
-                    if (root.TryGetProperty("message", out value)) return ReadContent(value);
-                    foreach (string property in new[] { "response", "text", "content", "output" })
-                        if (root.TryGetProperty(property, out value)) return value.GetString();
-                    if (hasDone) return "";
-                    throw InvalidStream();
-                }
+                JsonElement value;
+                if (root.TryGetProperty("error", out value)) throw InvalidStream();
+                if (root.TryGetProperty("done_reason", out value) && value.ValueKind != JsonValueKind.Null
+                    && value.GetString() != "stop") throw InvalidStream();
+                bool hasDone = root.TryGetProperty("done", out value);
+                if (hasDone) completed = value.GetBoolean();
+                JsonElement choices;
+                if (root.TryGetProperty("choices", out choices))
+                    return ParseChoice(choices, ref completed);
+                if (root.TryGetProperty("message", out value)) return ReadContent(value);
+                foreach (string property in new[] { "response", "text", "content", "output" })
+                    if (root.TryGetProperty(property, out value)) return value.GetString();
+                if (hasDone) return "";
+                throw InvalidStream();
             }
             catch (JsonException) { throw InvalidStream(); }
             catch (InvalidOperationException) { throw InvalidStream(); }

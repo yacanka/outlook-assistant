@@ -7,6 +7,8 @@ internal static class OutlookAdapterTests
 {
     public static void Run()
     {
+        CheckSourceBounds();
+        CheckRollback();
         var app = new Outlook.Application();
         using (var target = OutlookMailTarget.Capture(app, null, MailCapability.Compose))
         {
@@ -166,6 +168,57 @@ internal static class OutlookAdapterTests
             }
         }
         Console.WriteLine("Outlook adapter simulations passed (captured range, stale target, reply, draft cleanup). Real COM still requires Windows.");
+    }
+
+    private static void CheckSourceBounds()
+    {
+        var app = new Outlook.Application();
+        var mail = new Outlook.MailItem(app) { Sent = true, Body = new string('x', 32001),
+            BodyFormat = Outlook.OlBodyFormat.olFormatHTML, FailRichBodyRead = true };
+        var explorer = new Outlook.Explorer();
+        explorer.Selection.Items.Add(mail);
+        Throws<MailActionException>(() => { using (OutlookMailTarget.Capture(app, explorer, MailCapability.Reply)) { } });
+        Check(mail.RichBodyReads == 0, "Oversized reply text is rejected before reading its rich body.");
+        mail.Sent = false;
+        mail.Body = new string('x', 200000);
+        mail.GetInspector.Document.Select(0, 10);
+        Throws<MailActionException>(() => { using (OutlookMailTarget.Capture(app, mail.GetInspector, MailCapability.Improve)) { } });
+        Check(mail.RichBodyReads == 0, "A large Word document is rejected before loading a body snapshot.");
+    }
+
+    private static void CheckRollback()
+    {
+        foreach (string failure in new[] { "insert-before", "insert-after", "restore", "format-only", "stale-before", "undo" })
+        {
+            var app = new Outlook.Application();
+            var source = new Outlook.MailItem(app) { Body = "Prefix old suffix\rSignature\r", BodyFormat = Outlook.OlBodyFormat.olFormatHTML };
+            var inspector = source.GetInspector;
+            inspector.Document.Select(7, 10);
+            inspector.Document.ParagraphFormat.LeftIndent = 42;
+            inspector.Document.ListFormat.ListType = 1;
+            inspector.Document.ListFormat.ListLevelNumber = 2;
+            using (var target = OutlookMailTarget.Capture(app, inspector, MailCapability.Improve))
+            {
+                target.ApplyMarkdown = true;
+                source.Failure = failure == "insert-before" || failure == "stale-before" ? "insert" : null;
+                inspector.Document.FailAfterInsert = failure == "insert-after" || failure == "undo";
+                inspector.Document.FormatOnlyPartialFailure = failure == "format-only";
+                if (failure == "stale-before") inspector.Document.BeforeInsertionFailure = () => source.Subject = "External change";
+                inspector.Document.FailRestore = failure == "restore";
+                inspector.Document.FailUndo = failure == "undo";
+                Throws<Exception>(() => Approve(target, "# Replacement"));
+                if (failure == "undo")
+                {
+                    Check(inspector.Document.UndoCalls == 1, "A failed rollback is attempted once.");
+                    continue;
+                }
+                Check(source.Body == "Prefix old suffix\rSignature\r", "A failed write restores the original selected text: " + failure);
+                Check(inspector.Document.ParagraphFormat.LeftIndent == 42 && inspector.Document.ListFormat.ListType == 1
+                    && inspector.Document.ListFormat.ListLevelNumber == 2, "Rollback retains paragraph and list formatting: " + failure);
+                Check(inspector.Document.UndoCalls == (failure == "insert-before" || failure == "stale-before" ? 0 : 1),
+                    "Failure before mutation never undoes an earlier user edit: " + failure);
+            }
+        }
     }
 
     private static void Approve(IAiDraftTarget target, string result)

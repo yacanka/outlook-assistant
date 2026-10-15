@@ -38,8 +38,17 @@ namespace Microsoft.Office.Interop.Outlook
         public OlBodyFormat BodyFormat { get; set; }
         public string Body { get => inspector.Document.Text; set => inspector.Document.Text = value; }
         // Deliberately independent from live Word text to exercise the adapter's second snapshot.
-        public string HTMLBody { get; set; } = "<p>Original</p>";
-        public object RTFBody => new byte[] { 1, 2, 3 };
+        private string htmlBody = "<p>Original</p>";
+        public bool FailRichBodyRead;
+        public int RichBodyReads;
+        public int ReportedSize;
+        public int Size => ReportedSize;
+        public string HTMLBody
+        {
+            get { RichBodyReads++; if (FailRichBodyRead) throw new COMException("Unexpected full body read"); return htmlBody; }
+            set { htmlBody = value; }
+        }
+        public object RTFBody { get { RichBodyReads++; if (FailRichBodyRead) throw new COMException("Unexpected full body read"); return new byte[] { 1, 2, 3 }; } }
         public bool Displayed { get; private set; }
         public bool Discarded { get; private set; }
         public string Failure;
@@ -114,7 +123,21 @@ namespace OfficeSimulation
         public Document(Func<bool> failInsert)
         {
             this.failInsert = failInsert;
+            Application = new WordApplication(this);
             Windows.Values.Add(new Window(this));
+        }
+        public WordApplication Application { get; }
+        public bool FailAfterInsert;
+        public bool FormatOnlyPartialFailure;
+        public Action BeforeInsertionFailure;
+        public bool FailRestore;
+        public bool FailUndo;
+        public int UndoCalls;
+        public bool Undo(int count)
+        {
+            UndoCalls++;
+            if (FailUndo) return false;
+            return Application.UndoRecord.Restore();
         }
         public string Text { get; set; } = "";
         public string Unsupported;
@@ -136,6 +159,40 @@ namespace OfficeSimulation
             return new Range(this, start, end, failInsert);
         }
         public void Select(int start, int end) { Windows[1].Selection.Selected = Range(start, end); }
+    }
+    public sealed class WordApplication
+    {
+        public WordApplication(Document document) { UndoRecord = new UndoRecord(document); }
+        public UndoRecord UndoRecord { get; }
+    }
+    public sealed class UndoRecord
+    {
+        private readonly Document document;
+        private string originalText;
+        private float originalIndent;
+        private int originalListType;
+        private int originalListLevel;
+        public UndoRecord(Document document) { this.document = document; }
+        public bool IsRecordingCustomRecord { get; private set; }
+        public void StartCustomRecord(string name)
+        {
+            if (IsRecordingCustomRecord) throw new COMException("Nested record");
+            originalText = document.Text;
+            originalIndent = document.ParagraphFormat.LeftIndent;
+            originalListType = document.ListFormat.ListType;
+            originalListLevel = document.ListFormat.ListLevelNumber;
+            IsRecordingCustomRecord = true;
+        }
+        public void EndCustomRecord() { IsRecordingCustomRecord = false; }
+        public bool Restore()
+        {
+            if (originalText == null || IsRecordingCustomRecord) return false;
+            document.Text = originalText;
+            document.ParagraphFormat.LeftIndent = originalIndent;
+            document.ListFormat.ListType = originalListType;
+            document.ListFormat.ListLevelNumber = originalListLevel;
+            return true;
+        }
     }
     public sealed class Window
     {
@@ -203,7 +260,19 @@ namespace OfficeSimulation
                 return paragraphs;
             }
         }
-        public ParagraphFormat ParagraphFormat { get => document.ParagraphFormat; set => document.ParagraphFormat = value.Duplicate; }
+        public ParagraphFormat ParagraphFormat
+        {
+            get => document.ParagraphFormat;
+            set
+            {
+                if (document.FailRestore) { document.FailRestore = false; throw new COMException("Synthetic paragraph restore failure"); }
+                document.ParagraphFormat = value.Duplicate;
+            }
+        }
+        public string WordOpenXML => new System.Xml.Linq.XElement("selection",
+            new System.Xml.Linq.XAttribute("indent", document.ParagraphFormat.LeftIndent),
+            new System.Xml.Linq.XAttribute("list", document.ListFormat.ListType),
+            new System.Xml.Linq.XAttribute("level", document.ListFormat.ListLevelNumber), Text).ToString();
         public ListFormat ListFormat => document.ListFormat;
         public void InsertFile(string path, object range, bool confirmConversions, bool link, bool attachment)
         {
@@ -213,17 +282,18 @@ namespace OfficeSimulation
             document.LastInsertStart = Start;
             document.LastInsertEnd = End;
             // Record the real adapter's COM arguments. This deliberately does not emulate RTF layout.
-            Text = "[Imported rich content]";
+            if (!document.FormatOnlyPartialFailure) Text = "[Imported rich content]";
             // Import may change shared paragraph properties, even when its text range is narrow.
             document.ParagraphFormat.LeftIndent = 0;
             document.ListFormat.ListType = 0;
+            if (document.FailAfterInsert || document.FormatOnlyPartialFailure) throw new COMException("Synthetic failure after partial insertion");
         }
         public string Text
         {
             get => document.Text.Substring(Start, End - Start);
             set
             {
-                if (failInsert()) throw new COMException("Synthetic insertion failure");
+                if (failInsert()) { document.BeforeInsertionFailure?.Invoke(); throw new COMException("Synthetic insertion failure"); }
                 document.Text = document.Text.Substring(0, Start) + value + document.Text.Substring(End);
             }
         }

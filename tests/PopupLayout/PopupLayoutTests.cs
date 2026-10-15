@@ -46,7 +46,7 @@ internal static class PopupLayoutTests
             Check(preview.Text == "İlk parça", "Chunks become visible while generation is still running.");
             Check(!FindButton(progress, "&Mail’e aktar").Enabled, "Preview does not approve partial text.");
             Task.Run(() => progress.ReportChunk(" ve son parça")).GetAwaiter().GetResult();
-            progress.SetReady();
+            Ready(progress);
             Check(preview.Text == "İlk parça ve son parça", "Ready flushes the last chunk without losing or duplicating text.");
             CheckContent(progress);
             progress.Scale(new SizeF(1.5f, 1.5f));
@@ -58,7 +58,7 @@ internal static class PopupLayoutTests
         {
             progress.Show();
             progress.ReportChunk("First\n\nSecond\rThird");
-            progress.SetReady();
+            Ready(progress);
             var preview = FindPreview(progress);
             Check(preview.Lines.Length == 4 && preview.Lines[1] == "" && preview.Lines[3] == "Third",
                 "Plain preview displays LF, empty lines and standalone CR on separate lines.");
@@ -74,7 +74,7 @@ internal static class PopupLayoutTests
             while (preview.Text.Length == 0 && DateTime.UtcNow < deadline) Application.DoEvents();
             Check(preview.Text.Contains("Başlık"), "Partial Markdown is visible while streaming.");
             progress.ReportChunk("ın**\nAlt satır");
-            progress.SetReady("# Başlık\n\n**Kalın**\nAlt satır");
+            Ready(progress, "# Başlık\n\n**Kalın**\nAlt satır");
             Check(preview.Text.Contains("Kalın\nAlt satır"), "Rich preview preserves soft line breaks.");
             preview.Select(preview.Text.IndexOf("Kalın"), 5);
             Check(preview.SelectionFont.Bold, "Markdown emphasis is visibly bold in RichEdit.");
@@ -84,9 +84,41 @@ internal static class PopupLayoutTests
         using (var progress = new ProgressForm(cancellation, "Test", "Test", true, false))
         {
             progress.Show();
-            progress.SetReady("**Kalın**\nAlt satır");
+            Ready(progress, "**Kalın**\nAlt satır");
             Check(FindPreview(progress).Text.Replace("\r\n", "\n") == "Kalın\nAlt satır", "Plain target preview matches its readable transfer.");
             progress.FinishAndClose();
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Test", "Test", true))
+        {
+            progress.Show();
+            string source = "**Başlangıç** " + new string('x', 13000);
+            progress.ReportChunk(source);
+            PumpUntil(() => FindPreview(progress).Text.Length > 12000);
+            Check(FindPreview(progress).Text.StartsWith("**Başlangıç**"), "Large live previews stay plain until final formatting.");
+            Ready(progress, source);
+            Check(FindPreview(progress).Text.StartsWith("Başlangıç"), "Completion still applies Markdown to large live plain previews.");
+            progress.FinishAndClose();
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Test", "Test", true))
+        {
+            progress.Show();
+            progress.ClientSize = new Size(450, 500);
+            Ready(progress, "| A | B |\n| --- | --- |\n| x | y |");
+            Check(progress.PreparedContent.Rtf.Contains("\\cellx4320") && progress.PreparedContent.Rtf.Contains("\\cellx8640"),
+                "The Outlook table keeps its normal width independently of the preview window.");
+            progress.FinishAndClose();
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Test", "Test", true))
+        {
+            progress.Show();
+            Task ready = progress.SetReadyAsync(new string('x', 64000));
+            progress.Close();
+            PumpUntil(() => ready.IsCompleted);
+            try { ready.GetAwaiter().GetResult(); } catch (OperationCanceledException) { }
+            Check(!progress.WaitForApprovalAsync().GetAwaiter().GetResult(), "Closing during final rendering cannot approve a response.");
         }
         using (var input = new MailInputForm(true, false, ""))
         {
@@ -97,6 +129,20 @@ internal static class PopupLayoutTests
         }
         CheckSettingsColumns();
         Console.WriteLine("All popup layout checks passed.");
+    }
+
+    private static void Ready(ProgressForm progress, string result = null)
+    {
+        Task task = progress.SetReadyAsync(result);
+        PumpUntil(() => task.IsCompleted);
+        task.GetAwaiter().GetResult();
+    }
+
+    private static void PumpUntil(Func<bool> complete)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!complete() && DateTime.UtcNow < deadline) { Application.DoEvents(); Thread.Sleep(1); }
+        Check(complete(), "The UI operation completes before the test deadline.");
     }
 
     private static void CheckSettingsSelection()
@@ -239,6 +285,10 @@ internal static class PopupLayoutTests
             Askai.AiSettings.Load(path).Save(path);
             Check((string)System.Xml.Linq.XElement.Load(path).Element("RibbonPreset") == "Standard",
                 "An unknown preset safely falls back to the original layout.");
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider><RibbonPreset>RepliesMenu</RibbonPreset>"
+                + "<Token>invalid-base64</Token><MemoryText>invalid-base64</MemoryText></AiSettings>");
+            Check(Askai.AiSettings.LoadRibbonPreset(path) == Askai.AiRibbonPreset.RepliesMenu,
+                "Ribbon startup reads its preference without decrypting credentials or memory.");
         }
         finally { System.IO.Directory.Delete(folder, true); }
     }
@@ -273,7 +323,7 @@ internal static class PopupLayoutTests
                 try
                 {
                     var task = new Askai.AiService().SendStreamingRequestAsync("synthetic", null, CancellationToken.None, settings);
-                    if (task.IsFaulted) { var ignored = task.Exception; }
+                    task.GetAwaiter().GetResult();
                 }
                 catch (Askai.AiServiceException) { rejected = true; }
                 Check(rejected, "The selected " + provider + " " + mode + " certificate is validated before transport starts.");
@@ -343,7 +393,24 @@ internal static class PopupLayoutTests
             Check((string)currentCertificate.GetValue(settings) == "", "Clear empties only the active service and mode.");
             provider.SelectedIndex = 0;
             Check((string)currentCertificate.GetValue(settings) == "synthetic-central-certificate", "Clearing TAB trust preserves PLUS AI trust.");
-            Check(FindControl(settings, "RibbonPreset") is ComboBox, "The ribbon layout is selectable in settings.");
+            var preset = (ComboBox)FindControl(settings, "RibbonPreset");
+            var appearancePage = (TabPage)markdown.Parent.Parent;
+            Check(appearancePage.Text == "Görünüm" && preset.Parent == markdown.Parent,
+                "Appearance settings group the ribbon and Markdown preferences on the renamed tab.");
+            Check((string)preset.Items[0] == "Ayrı yanıt düğmeleri"
+                && (string)preset.Items[1] == "Yanıt menüsü, büyük düğmeler",
+                "Preset labels describe the layouts without numbers and preserve their order.");
+            var appearanceLayout = (TableLayoutPanel)markdown.Parent;
+            var markdownHeading = (Label)appearanceLayout.GetControlFromPosition(0, appearanceLayout.GetRow(markdown) - 1);
+            Check(markdownHeading.Text == "Markdown" && markdownHeading.Font.Bold && markdownHeading.Padding.Top >= 16,
+                "Markdown has a distinct heading and space separating it from the preset selector.");
+            var tooltip = (ToolTip)typeof(Askai.AiSettingsForm).GetField("help",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(settings);
+            Check(!System.Text.RegularExpressions.Regex.IsMatch(tooltip.GetToolTip(preset), @"\d"),
+                "Preset help contains no numeric references.");
+            Check(tooltip.GetToolTip(markdown).Contains("Markdown işaretlerini")
+                && tooltip.GetToolTip(markdown).Contains("Outlook"),
+                "Markdown help explains the conversion and where it is applied.");
             tabs.SelectedTab = (TabPage)memory.Parent.Parent;
             memory.Text = "Synthetic context";
             ((Button)FindControl(settings, "ClearMemory")).PerformClick();

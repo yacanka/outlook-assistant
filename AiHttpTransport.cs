@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Security.Authentication;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Askai
 {
@@ -30,6 +31,17 @@ namespace Askai
             }
             if (forLegacy) return (useTls12 ? legacyTls12 : legacyDefault).Value;
             return (useTls12 ? centralTls12 : centralDefault).Value;
+        }
+
+        internal static Task<HttpClient> GetClientAsync(bool useTls12, bool forLegacy, string certificate,
+            CertificateTrustMode mode, CancellationToken token)
+        {
+            if (string.IsNullOrEmpty(certificate))
+            {
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(GetClient(useTls12, forLegacy));
+            }
+            return CertificateValidation.RunAsync(() => GetClient(useTls12, forLegacy, certificate, mode), token);
         }
 
         private static HttpClient GetCertificateClient(bool useTls12, bool forLegacy, ServerCertificateTrust trust)

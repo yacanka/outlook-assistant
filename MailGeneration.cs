@@ -3,6 +3,18 @@ using System.Text.Json;
 
 namespace Askai
 {
+    internal static class MailContentLimits
+    {
+        internal const int SourceCharacters = 32000;
+        internal const int GeneratedCharacters = 64000;
+        internal const int RtfCharacters = 1024 * 1024;
+        internal const int TableColumns = 12;
+        internal const int TableRows = 200;
+        internal const int TableCells = 2000;
+        internal const int LivePreviewCharacters = 12000;
+        internal const int LiveRtfCharacters = 128000;
+    }
+
     internal enum MailCapability { Compose, Improve, Reply, ReplyAll }
     internal enum MailGenerationState { Preparing, AwaitingApproval, Applying, Completed, Cancelled, Failed }
 
@@ -36,7 +48,7 @@ namespace Askai
                 throw new MailActionException("Mail konusu boş olamaz.");
             if (Capability == MailCapability.Improve && string.IsNullOrWhiteSpace(Source))
                 throw new MailActionException("İyileştirilecek metni Outlook editöründe seçin.");
-            if (Source.Length > 32000 || Subject.Length > 255 || Instructions.Length > 4000)
+            if (Source.Length > MailContentLimits.SourceCharacters || Subject.Length > 255 || Instructions.Length > 4000)
                 throw new MailActionException("İçerik çok uzun. Konuyu 255, talimatı 4.000, kaynak metni 32.000 karakterle sınırlayın.");
 
             bool hasMemory = !string.IsNullOrWhiteSpace(memory);
@@ -100,6 +112,11 @@ namespace Askai
         public bool Complete(string text)
         {
             if (State != MailGenerationState.Preparing) return false;
+            if (text != null && text.Length > MailContentLimits.GeneratedCharacters)
+            {
+                Fail();
+                throw new MailActionException("AI yanıtı 64.000 karakter sınırını aşıyor. Daha kısa bir içerik isteyin; mail değiştirilmedi.");
+            }
             if (string.IsNullOrWhiteSpace(text))
             {
                 Fail();
