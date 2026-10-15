@@ -3,6 +3,8 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
+using System.Xml;
+using System.Threading;
 
 namespace Askai
 {
@@ -11,6 +13,7 @@ namespace Askai
 
     public sealed class AiSettings
     {
+        private static int cachedRibbonPreset = -1;
         public AiProvider Provider { get; set; } = AiProvider.Central;
         public string Model { get; set; } = "";
         public string Token { get; set; } = "";
@@ -39,12 +42,42 @@ namespace Askai
 
         public static AiSettings Load() { return Load(SettingsPath); }
 
+        internal static AiRibbonPreset LoadRibbonPreset()
+        {
+            int cached = Volatile.Read(ref cachedRibbonPreset);
+            if (cached >= 0) return (AiRibbonPreset)cached;
+            AiRibbonPreset preset;
+            try { preset = LoadRibbonPreset(SettingsPath); }
+            catch (InvalidOperationException) { preset = AiRibbonPreset.Standard; }
+            Interlocked.CompareExchange(ref cachedRibbonPreset, (int)preset, -1);
+            return (AiRibbonPreset)Volatile.Read(ref cachedRibbonPreset);
+        }
+
+        internal static AiRibbonPreset LoadRibbonPreset(string path)
+        {
+            if (!File.Exists(path)) return AiRibbonPreset.Standard;
+            try { return ParseRibbonPreset((string)LoadRoot(path).Element("RibbonPreset")); }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is XmlException)
+            {
+                throw new InvalidOperationException("AI şerit ayarı okunamadı. AI Asistan ayarlarından yeniden kaydedin.");
+            }
+        }
+
+        private static XElement LoadRoot(string path)
+        {
+            var options = new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 4 * 1024 * 1024
+            };
+            using (var reader = XmlReader.Create(path, options)) return XElement.Load(reader);
+        }
+
         internal static AiSettings Load(string path)
         {
             if (!File.Exists(path)) return new AiSettings();
             try
             {
-                var root = XElement.Load(path);
+                var root = LoadRoot(path);
                 AiProvider provider;
                 if (!Enum.TryParse((string)root.Element("Provider"), out provider)
                     || !Enum.IsDefined(typeof(AiProvider), provider)) throw new FormatException();
@@ -112,6 +145,8 @@ namespace Askai
                 root.Save(temporary);
                 if (File.Exists(path)) File.Replace(temporary, path, null);
                 else File.Move(temporary, path);
+                if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(SettingsPath), StringComparison.OrdinalIgnoreCase))
+                    Volatile.Write(ref cachedRibbonPreset, (int)ParseRibbonPreset(RibbonPreset.ToString()));
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }

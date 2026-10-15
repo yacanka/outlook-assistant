@@ -32,6 +32,7 @@
     </EmbeddedResource>
     <Compile Include="..\..\ServerCertificateTrust.cs" />
     <Compile Include="..\..\CertificateMaterial.cs" />
+    <Compile Include="..\..\CertificateValidation.cs" />
     <Compile Include="..\..\AiConnectionErrors.cs" />
     <Compile Include="PopupLayoutTests.cs" />
     <Compile Include="RibbonSimulation.cs" />

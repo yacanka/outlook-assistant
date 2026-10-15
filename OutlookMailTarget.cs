@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using Askai;
 using Outlook = Microsoft.Office.Interop.Outlook;
@@ -27,6 +28,12 @@ namespace Ask.ai
         private int selectionEnd;
         private bool closed;
         private bool subscribed;
+        private string preparedText;
+        private FormattedMailContent preparedContent;
+        private const int MaxMessageBytes = 50 * 1024 * 1024;
+        private const int MaxDocumentCharacters = 128000;
+        private const int MaxHtmlCharacters = 1024 * 1024;
+        private const int MaxRtfBytes = 4 * 1024 * 1024;
         public string Subject { get; private set; } = "";
         public string Source { get; private set; } = "";
         public bool ApplyMarkdown { get; set; }
@@ -71,8 +78,9 @@ namespace Ask.ai
                 sourceMail = references.Keep(selection[1]) as Outlook.MailItem;
             }
             if (sourceMail == null) throw new MailActionException("Seçili öğe bir e-posta değil.");
+            RequireMessageSize();
             Subject = sourceMail.Subject ?? "";
-            bodySnapshot = ReadBodySnapshot(sourceMail);
+            if (Subject.Length > 255) throw SourceTooLarge();
             if (sourceInspector != null)
             {
                 ((Outlook.InspectorEvents_10_Event)sourceInspector).Close += OnInspectorClosed;
@@ -84,7 +92,9 @@ namespace Ask.ai
                 if (!sourceMail.Sent || sourceMail.Submitted)
                     throw new MailActionException("Yanıt hazırlamak için alınmış veya gönderilmiş bir mail seçin. Taslak için 'Seçili metni iyileştir' kullanın.");
                 Source = "Gönderen: " + (sourceMail.SenderName ?? "") + "\n\n" + (sourceMail.Body ?? "");
+                if (Source.Length > MailContentLimits.SourceCharacters) throw SourceTooLarge();
             }
+            bodySnapshot = ReadBodySnapshot(sourceMail);
         }
 
         private void CaptureSelection()
@@ -101,6 +111,7 @@ namespace Ask.ai
                 if ((int)selection.Type != 2) // wdSelectionNormal: reject block/table/object selections.
                     throw new MailActionException("İyileştirilecek normal metin aralığını seçin.");
                 dynamic range = local.Keep(selection.Range);
+                if ((int)range.End - (int)range.Start > MailContentLimits.SourceCharacters + 2) throw SourceTooLarge();
                 ValidateTextRange(document, range);
                 int startOffset, endOffset;
                 selectedText = MailText.SelectionContent((string)range.Text, out startOffset, out endOffset);
@@ -110,6 +121,7 @@ namespace Ask.ai
                     throw new MailActionException("İyileştirilecek metni Outlook editöründe seçin.");
                 Source = selectedText;
                 dynamic content = local.Keep(document.Content);
+                RequireDocumentSize(content);
                 documentTextSnapshot = (string)content.Text;
             }
         }
@@ -120,6 +132,7 @@ namespace Ask.ai
             if (capability == MailCapability.Compose) return true;
             try
             {
+                RequireMessageSize();
                 if ((sourceMail.Subject ?? "") != Subject || ReadBodySnapshot(sourceMail) != bodySnapshot) return false;
                 if (capability != MailCapability.Improve) return !sourceMail.Submitted;
                 if (sourceMail.Sent || sourceMail.Submitted || sourceInspector == null) return false;
@@ -129,6 +142,7 @@ namespace Ask.ai
                     object currentDocument = local.Keep(GetWordDocument(sourceInspector));
                     if (!ReferenceEquals(currentMail, sourceMail) || !ReferenceEquals(currentDocument, (object)document)) return false;
                     dynamic content = local.Keep(document.Content);
+                    RequireDocumentSize(content);
                     if ((string)content.Text != documentTextSnapshot) return false;
                     dynamic range = local.Keep(document.Range(selectionStart, selectionEnd));
                     ValidateTextRange(document, range);
@@ -143,7 +157,8 @@ namespace Ask.ai
         public void Apply(string text)
         {
             // Render completely before any Outlook mutation. Keep the raw response when disabled.
-            FormattedMailContent formatted = ApplyMarkdown ? MailFormatting.Create(text, true) : null;
+            FormattedMailContent formatted = ApplyMarkdown
+                ? (text == preparedText ? preparedContent : null) ?? MailFormatting.Create(text, true) : null;
             if (formatted != null) formatted.EnsureVisibleText();
             if (capability == MailCapability.Improve)
             {
@@ -154,24 +169,93 @@ namespace Ask.ai
                 using (var local = new ComReferences())
                 {
                     dynamic range = local.Keep(document.Range(selectionStart, selectionEnd));
-                    // Do not replace HTMLBody: only this range is editable by the capability.
-                    if (formatted != null && SupportsRichText)
-                    {
-                        var prefix = CaptureRetainedParagraph(local, (object)document, selectionStart, selectionEnd, true);
-                        var suffix = CaptureRetainedParagraph(local, (object)document, selectionStart, selectionEnd, false);
-                        dynamic before = local.Keep(document.Content);
-                        int originalEnd = (int)before.End;
-                        InsertFormatted(range, formatted.Rtf);
-                        dynamic after = local.Keep(document.Content);
-                        int delta = (int)after.End - originalEnd;
-                        if (prefix != null) RestoreRetainedParagraph(local, (object)document, prefix, 0);
-                        if (suffix != null) RestoreRetainedParagraph(local, (object)document, suffix, delta);
-                    }
-                    else range.Text = MailText.ForWord(formatted == null ? text : formatted.PlainText).Trim('\r', '\v');
+                    ApplySelection(local, range, text, formatted);
                 }
                 return;
             }
             CreateDraft(text, formatted);
+        }
+
+        internal void SetPreparedContent(string text, FormattedMailContent content)
+        {
+            preparedText = text;
+            preparedContent = content;
+        }
+
+        private void ApplySelection(ComReferences local, dynamic range, string text, FormattedMailContent formatted)
+        {
+            dynamic word = local.Keep(document.Application);
+            dynamic undo = local.Keep(word.UndoRecord);
+            if ((bool)undo.IsRecordingCustomRecord)
+                throw new MailActionException("Outlook editöründe başka bir düzenleme devam ediyor. Biraz sonra yeniden deneyin.");
+            string originalSelection = SelectionFingerprint();
+            undo.StartCustomRecord("AI Asistan metin iyileştirme");
+            bool recording = true;
+            try
+            {
+                WriteSelection(local, (object)range, text, formatted);
+                undo.EndCustomRecord();
+                recording = false;
+            }
+            catch
+            {
+                try
+                {
+                    if (recording) undo.EndCustomRecord();
+                    // Inspect live Word content, including formatting. Outlook's cached body
+                    // can lag behind a partial COM write. Subject/Inspector changes alone
+                    // must never cause Undo to consume the user's preceding edit.
+                    if (SelectionChanged(originalSelection)
+                        && (!(bool)document.Undo(1) || SelectionChanged(originalSelection)))
+                        throw new InvalidOperationException();
+                }
+                catch
+                {
+                    throw new MailActionException("Aktarım tamamlanamadı ve önceki içerik otomatik geri yüklenemedi. Taslak kısmen değişmiş olabilir; Outlook’ta içeriği ve Geri Al seçeneğini kontrol edin.");
+                }
+                throw;
+            }
+        }
+
+        private string SelectionFingerprint()
+        {
+            using (var local = new ComReferences())
+            {
+                dynamic range = local.Keep(document.Range(selectionStart, selectionEnd));
+                string xml = (string)range.WordOpenXML;
+                if (xml == null || xml.Length > MaxRtfBytes) throw SourceTooLarge();
+                using (var hash = SHA256.Create()) return Convert.ToBase64String(hash.ComputeHash(Encoding.UTF8.GetBytes(xml)));
+            }
+        }
+
+        private bool SelectionChanged(string originalSelection)
+        {
+            using (var local = new ComReferences())
+            {
+                dynamic content = local.Keep(document.Content);
+                RequireDocumentSize(content);
+                if ((string)content.Text != documentTextSnapshot) return true;
+            }
+            return SelectionFingerprint() != originalSelection;
+        }
+
+        private void WriteSelection(ComReferences local, dynamic range, string text, FormattedMailContent formatted)
+        {
+            // Do not replace HTMLBody: only this range is editable by the capability.
+            if (formatted == null || !SupportsRichText)
+            {
+                range.Text = MailText.ForWord(formatted == null ? text : formatted.PlainText).Trim('\r', '\v');
+                return;
+            }
+            var prefix = CaptureRetainedParagraph(local, (object)document, selectionStart, selectionEnd, true);
+            var suffix = CaptureRetainedParagraph(local, (object)document, selectionStart, selectionEnd, false);
+            dynamic before = local.Keep(document.Content);
+            int originalEnd = (int)before.End;
+            InsertFormatted(range, formatted.Rtf);
+            dynamic after = local.Keep(document.Content);
+            int delta = (int)after.End - originalEnd;
+            if (prefix != null) RestoreRetainedParagraph(local, (object)document, prefix, 0);
+            if (suffix != null) RestoreRetainedParagraph(local, (object)document, suffix, delta);
         }
 
         private void CreateDraft(string text, FormattedMailContent formatted)
@@ -244,7 +328,14 @@ namespace Ask.ai
                 // No field link, attachment, clipboard or replacement of the entire mail body.
                 range.InsertFile(path, Type.Missing, false, false, false);
             }
-            finally { if (File.Exists(path)) File.Delete(path); }
+            finally
+            {
+                // Cleanup failure after a successful insertion must not report a failed write
+                // or discard a newly created draft. Never log the path or mail contents.
+                try { File.Delete(path); }
+                catch (IOException) { System.Diagnostics.Trace.TraceWarning("AI Asistan geçici RTF dosyası temizlenemedi."); }
+                catch (UnauthorizedAccessException) { System.Diagnostics.Trace.TraceWarning("AI Asistan geçici RTF dosyası temizlenemedi."); }
+            }
         }
 
         private static RetainedParagraph CaptureRetainedParagraph(ComReferences local, object editorDocument,
@@ -300,12 +391,45 @@ namespace Ask.ai
 
         private static string ReadBodySnapshot(Outlook.MailItem mail)
         {
+            byte[] bytes;
+            string format;
             switch (mail.BodyFormat)
             {
-                case Outlook.OlBodyFormat.olFormatHTML: return "html:" + mail.HTMLBody;
-                case Outlook.OlBodyFormat.olFormatRichText: return "rtf:" + Convert.ToBase64String((byte[])mail.RTFBody);
-                default: return "text:" + mail.Body;
+                case Outlook.OlBodyFormat.olFormatHTML:
+                    string html = mail.HTMLBody ?? "";
+                    if (html.Length > MaxHtmlCharacters) throw SourceTooLarge();
+                    bytes = Encoding.UTF8.GetBytes(html);
+                    format = "html:";
+                    break;
+                case Outlook.OlBodyFormat.olFormatRichText:
+                    bytes = (byte[])mail.RTFBody ?? new byte[0];
+                    if (bytes.Length > MaxRtfBytes) throw SourceTooLarge();
+                    format = "rtf:";
+                    break;
+                default:
+                    string body = mail.Body ?? "";
+                    if (body.Length > MaxDocumentCharacters) throw SourceTooLarge();
+                    bytes = Encoding.UTF8.GetBytes(body);
+                    format = "text:";
+                    break;
             }
+            // Retain a fixed-size digest rather than a second full HTML string or Base64 RTF.
+            using (var hash = SHA256.Create()) return format + Convert.ToBase64String(hash.ComputeHash(bytes));
+        }
+
+        private void RequireMessageSize()
+        {
+            if (sourceMail.Size > MaxMessageBytes) throw SourceTooLarge();
+        }
+
+        private static void RequireDocumentSize(dynamic content)
+        {
+            if ((int)content.End - (int)content.Start > MaxDocumentCharacters) throw SourceTooLarge();
+        }
+
+        private static MailActionException SourceTooLarge()
+        {
+            return new MailActionException("Mail bu işlem için çok büyük. Kaynak metni 32.000 karakterle sınırlayın veya ilgili bölümü daha küçük, büyük ekler içermeyen bir taslakta seçin. İçerik kesilmedi ve mail değiştirilmedi.");
         }
 
         private static void ValidateTextRange(dynamic editor, dynamic range)
@@ -360,6 +484,8 @@ namespace Ask.ai
             bodySnapshot = null;
             documentTextSnapshot = null;
             selectedText = null;
+            preparedText = null;
+            preparedContent = null;
         }
     }
 

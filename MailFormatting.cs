@@ -12,7 +12,9 @@ namespace Askai
     {
         public string PlainText { get; }
         public string Rtf { get; }
-        public FormattedMailContent(string plainText, string rtf) { PlainText = plainText; Rtf = rtf; }
+        public bool UsedPlainTextFallback { get; }
+        public FormattedMailContent(string plainText, string rtf, bool usedPlainTextFallback = false)
+        { PlainText = plainText; Rtf = rtf; UsedPlainTextFallback = usedPlainTextFallback; }
         public void EnsureVisibleText()
         {
             if (string.IsNullOrWhiteSpace(PlainText))
@@ -24,13 +26,29 @@ namespace Askai
     internal sealed class MailPreviewBuffer
     {
         private readonly StringBuilder source = new StringBuilder();
+        private bool endedWithCr;
         public string Source => source.ToString();
+        public int Length => source.Length;
+        public int Version { get; private set; }
         public string Append(string chunk)
         {
+            if (string.IsNullOrEmpty(chunk)) return "";
+            if (chunk.Length > MailContentLimits.GeneratedCharacters - source.Length)
+                throw new MailActionException("AI yanıtı 64.000 karakter sınırını aşıyor. Mail değiştirilmedi.");
+            int start = endedWithCr && chunk[0] == '\n' ? 1 : 0;
+            endedWithCr = chunk[chunk.Length - 1] == '\r';
             source.Append(chunk);
-            return MailText.ForPreview(source.ToString());
+            Version++;
+            return MailText.ForPreview(chunk.Substring(start));
         }
-        public void Replace(string text) { source.Clear(); source.Append(text); }
+        public void Replace(string text)
+        {
+            if ((text ?? "").Length > MailContentLimits.GeneratedCharacters)
+                throw new MailActionException("AI yanıtı 64.000 karakter sınırını aşıyor. Mail değiştirilmedi.");
+            source.Clear();
+            endedWithCr = false;
+            Append(text);
+        }
     }
 
     internal static class MailFormatting
@@ -41,13 +59,54 @@ namespace Askai
 
         public static FormattedMailContent Create(string source, bool applyMarkdown, int tableWidthTwips = 8640)
         {
-            var renderer = new MailRtfRenderer(tableWidthTwips);
+            if ((source ?? "").Length > MailContentLimits.GeneratedCharacters)
+                throw new MailActionException("AI yanıtı 64.000 karakter sınırını aşıyor. Daha kısa bir içerik isteyin; mail değiştirilmedi.");
             string text = (source ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Replace('\v', '\n');
-            if (applyMarkdown) renderer.Render(Markdown.Parse(text, Pipeline));
-            else renderer.WriteLiteral(text);
-            return renderer.Complete();
+            if (!applyMarkdown) return Literal(text, tableWidthTwips, false);
+            // Reject wide pipe rows before the parser can pad a sparse table into a large AST.
+            if (HasWidePipeRow(text)) return Literal(text, tableWidthTwips, true);
+            try
+            {
+                var renderer = new MailRtfRenderer(tableWidthTwips);
+                renderer.Render(Markdown.Parse(text, Pipeline));
+                return renderer.Complete();
+            }
+            catch (MailFormattingLimitException) { return Literal(text, tableWidthTwips, true); }
+        }
+
+        private static FormattedMailContent Literal(string text, int width, bool fallback)
+        {
+            var renderer = new MailRtfRenderer(width);
+            renderer.WriteLiteral(text);
+            var content = renderer.Complete();
+            return new FormattedMailContent(content.PlainText, content.Rtf, fallback);
+        }
+
+        private static bool HasWidePipeRow(string text)
+        {
+            using (var reader = new System.IO.StringReader(text))
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    line = line.Trim();
+                    int pipes = 0;
+                    bool escaped = false;
+                    foreach (char value in line)
+                    {
+                        if (!escaped && value == '|') pipes++;
+                        escaped = !escaped && value == '\\';
+                    }
+                    int columns = pipes + 1 - (line.StartsWith("|") ? 1 : 0)
+                        - (line.EndsWith("|") && !line.EndsWith("\\|") ? 1 : 0);
+                    if (columns > MailContentLimits.TableColumns) return true;
+                }
+            }
+            return false;
         }
     }
+
+    internal sealed class MailFormattingLimitException : Exception { }
 
     /// <summary>
     /// Emits only application-owned RTF controls. Markdown is never accepted as HTML, RTF,
@@ -60,6 +119,8 @@ namespace Askai
         private readonly StringBuilder lists = new StringBuilder();
         private readonly StringBuilder overrides = new StringBuilder();
         private int listCount;
+        private int tableCells;
+        private int inlineDepth;
         private bool hasBlock;
         private readonly int tableWidthTwips;
 
@@ -71,7 +132,9 @@ namespace Askai
         {
             string header = "{\\rtf1\\ansi\\deff0\\uc1{\\fonttbl{\\f0 Segoe UI;}{\\f1 Consolas;}}";
             if (listCount > 0) header += "{\\*\\listtable" + lists + "}{\\*\\listoverridetable" + overrides + "}";
-            return new FormattedMailContent(plain.ToString(), header + "\\pard\\plain\\f0\\fs20 " + body + "}");
+            string rtf = header + "\\pard\\plain\\f0\\fs20 " + body + "}";
+            if (rtf.Length > MailContentLimits.RtfCharacters) throw new MailFormattingLimitException();
+            return new FormattedMailContent(plain.ToString(), rtf);
         }
 
         public void Render(ContainerBlock container, int indent = 0)
@@ -92,6 +155,8 @@ namespace Askai
 
         private void RenderBlock(Block block, int indent)
         {
+            if (indent > 32 || body.Length + lists.Length + overrides.Length > MailContentLimits.RtfCharacters)
+                throw new MailFormattingLimitException();
             var list = block as ListBlock;
             if (list != null) { RenderList(list, indent); return; }
             var table = block as Table;
@@ -181,6 +246,10 @@ namespace Askai
             int columns = table.ColumnDefinitions == null ? 0 : table.ColumnDefinitions.Count;
             foreach (TableRow row in table) columns = Math.Max(columns, row.Count);
             if (columns == 0) return;
+            if (columns > MailContentLimits.TableColumns || table.Count > MailContentLimits.TableRows
+                || table.Count * columns > MailContentLimits.TableCells - tableCells)
+                throw new MailFormattingLimitException();
+            tableCells += table.Count * columns;
             bool firstRow = true;
             foreach (TableRow row in table)
             {
@@ -226,7 +295,16 @@ namespace Askai
         private void RenderInlines(ContainerInline container)
         {
             if (container == null) return;
-            for (Inline inline = container.FirstChild; inline != null; inline = inline.NextSibling) RenderInline(inline);
+            if (++inlineDepth > 32) throw new MailFormattingLimitException();
+            try
+            {
+                for (Inline inline = container.FirstChild; inline != null; inline = inline.NextSibling)
+                {
+                    if (body.Length > MailContentLimits.RtfCharacters) throw new MailFormattingLimitException();
+                    RenderInline(inline);
+                }
+            }
+            finally { inlineDepth--; }
         }
 
         private void RenderInline(Inline inline)

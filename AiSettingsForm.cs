@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using System.Threading;
 
 namespace Askai
 {
@@ -37,6 +38,14 @@ namespace Askai
         private TableLayoutPanel plusAccess;
         private AiSettings draft = new AiSettings();
         private AiProvider certificateProvider;
+        private readonly CancellationTokenSource lifetime = new CancellationTokenSource();
+        private CancellationTokenSource certificateInfoCancellation;
+        private int certificateInfoVersion;
+        private bool resourcesDisposed;
+        private bool saving;
+        private bool selectingCertificate;
+        private Button saveButton;
+        private TabControl settingsTabs;
         private CertificateTrustMode CurrentCertificateMode => certificateMode.SelectedIndex == 2
             ? CertificateTrustMode.CertificateBundle : certificateMode.SelectedIndex == 1
                 ? CertificateTrustMode.CertificateAuthority : CertificateTrustMode.ServerCertificate;
@@ -66,19 +75,21 @@ namespace Askai
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             var tabs = new TabControl { Name = "SettingsTabs", Dock = DockStyle.Fill, Padding = new Point(8, 5), TabIndex = 0 };
+            settingsTabs = tabs;
             var servicePage = new TabPage("Servis") { BackColor = SystemColors.Window };
             var connectionPage = new TabPage("Gelişmiş") { BackColor = SystemColors.Window };
             tabs.TabPages.Add(servicePage);
             tabs.TabPages.Add(connectionPage);
-            var formattingPage = new TabPage("Mail biçimlendirme") { BackColor = SystemColors.Window };
+            var formattingPage = new TabPage("Görünüm") { BackColor = SystemColors.Window };
             tabs.TabPages.Add(formattingPage);
             var formattingLayout = CreatePageLayout();
-            AddRow(formattingLayout, FieldLabel("&Şerit düzeni"));
-            ribbonPreset.Items.AddRange(new object[] { "1 — Ayrı yanıt düğmeleri", "2 — Yanıt menüsü, büyük düğmeler" });
+            AddRow(formattingLayout, SectionLabel("&Şerit düzeni"));
+            ribbonPreset.Items.AddRange(new object[] { "Ayrı yanıt düğmeleri", "Yanıt menüsü, büyük düğmeler" });
             AddRow(formattingLayout, ribbonPreset);
-            help.SetToolTip(ribbonPreset, "1: Mail Hazırla büyük; yanıt ve ayarlar küçük. 2: Yanıt seçenekleri tek büyük menüde; ayarlar büyük.");
+            help.SetToolTip(ribbonPreset, "Ayrı yanıt düğmeleri: Mail Hazırla büyük; yanıt ve ayarlar küçük.\nYanıt menüsü, büyük düğmeler: Yanıt seçenekleri tek büyük menüde; ayarlar büyük.");
+            AddRow(formattingLayout, SectionLabel("Markdown"));
             AddRow(formattingLayout, applyMarkdown);
-            help.SetToolTip(applyMarkdown, "Başlık, vurgu, liste ve tabloları önizlemede ve Outlook’ta biçimlendirir.");
+            help.SetToolTip(applyMarkdown, "AI yanıtındaki Markdown işaretlerini önizlemede ve Outlook mailinde başlık, kalın yazı, liste ve tablo biçimine dönüştürür.");
             formattingPage.Controls.Add(formattingLayout);
             layout.Controls.Add(tabs, 0, 0);
             BuildServicePage(servicePage);
@@ -93,6 +104,7 @@ namespace Askai
                 FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, 12, 0, 0), TabIndex = 1
             };
             var save = new Button { Text = "&Kaydet", AutoSize = true, TabIndex = 0 };
+            saveButton = save;
             StyleButton(save);
             save.BackColor = SystemColors.Highlight;
             save.ForeColor = SystemColors.HighlightText;
@@ -143,8 +155,21 @@ namespace Askai
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) help.Dispose();
+            if (disposing && !resourcesDisposed)
+            {
+                resourcesDisposed = true;
+                lifetime.Cancel();
+                if (certificateInfoCancellation != null) { certificateInfoCancellation.Cancel(); certificateInfoCancellation.Dispose(); }
+                lifetime.Dispose();
+                help.Dispose();
+            }
             base.Dispose(disposing);
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            UpdateCertificateInfo();
         }
 
         private void BuildMemoryPage(TabPage page)
@@ -301,8 +326,9 @@ namespace Askai
             UpdateCertificateInfo();
         }
 
-        private void SelectServerCertificate(object sender, EventArgs args)
+        private async void SelectServerCertificate(object sender, EventArgs args)
         {
+            if (selectingCertificate || saving) return;
             using (var picker = new OpenFileDialog
             {
                 Title = CurrentCertificateMode == CertificateTrustMode.CertificateBundle
@@ -314,21 +340,35 @@ namespace Askai
             })
             {
                 if (picker.ShowDialog(this) != DialogResult.OK) return;
+                selectingCertificate = true;
+                SetCertificateBusy(true);
+                var mode = CurrentCertificateMode;
+                string[] paths = picker.FileNames;
                 try
                 {
-                    var certificate = ServerCertificateTrust.FromFiles(picker.FileNames, CurrentCertificateMode);
+                    var certificate = await ServerCertificateTrust.FromFilesAsync(paths, mode, lifetime.Token);
+                    if (resourcesDisposed) return;
                     SetCurrentCertificateData(certificate.EncodedCertificate);
                     certificateInfo.Text = certificate.Description;
                 }
+                catch (OperationCanceledException) { }
                 catch (AiServiceException ex)
                 {
-                    MessageBox.Show(ex.Message, "Sunucu sertifikası", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (!resourcesDisposed) MessageBox.Show(ex.Message, "Sunucu sertifikası", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
+                catch (Exception)
+                {
+                    if (!resourcesDisposed) MessageBox.Show("Sertifika kontrolü tamamlanamadı. Dosyaları ve Windows sertifika altyapısını kontrol edin.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                finally { selectingCertificate = false; if (!resourcesDisposed) SetCertificateBusy(false); }
             }
         }
 
-        private void UpdateCertificateInfo()
+        private async void UpdateCertificateInfo()
         {
+            if (resourcesDisposed) return;
+            int version = ++certificateInfoVersion;
+            if (certificateInfoCancellation != null) { certificateInfoCancellation.Cancel(); certificateInfoCancellation.Dispose(); certificateInfoCancellation = null; }
             help.SetToolTip(certificateMode, CurrentCertificateMode == CertificateTrustMode.CertificateBundle
                 ? "Kök, ara ve sunucu sertifikaları yüklenebilir. İptal edilmiş sertifikalar denetlenmez."
                 : CurrentCertificateMode == CertificateTrustMode.CertificateAuthority
@@ -339,8 +379,35 @@ namespace Askai
                 certificateInfo.Text = "Sertifika seçilmedi. Sistem sertifika doğrulaması kullanılır.";
                 return;
             }
-            try { certificateInfo.Text = ServerCertificateTrust.FromBase64(CurrentCertificateData, CurrentCertificateMode).Description; }
-            catch (AiServiceException) { certificateInfo.Text = "Kaydedilmiş sertifika geçersiz veya süresi dolmuş. Yeniden seçin veya temizleyin."; }
+            certificateInfo.Text = "Sertifika kontrol ediliyor…";
+            if (!IsHandleCreated) return; // Start native work only after the UI context is installed.
+            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            certificateInfoCancellation = cancellation;
+            string data = CurrentCertificateData;
+            var mode = CurrentCertificateMode;
+            try
+            {
+                var certificate = await ServerCertificateTrust.FromBase64Async(data, mode, cancellation.Token);
+                if (!resourcesDisposed && version == certificateInfoVersion) certificateInfo.Text = certificate.Description;
+            }
+            catch (OperationCanceledException) { }
+            catch (AiServiceException ex)
+            {
+                if (!resourcesDisposed && version == certificateInfoVersion) certificateInfo.Text = ex.Message;
+            }
+            catch (Exception)
+            {
+                if (!resourcesDisposed && version == certificateInfoVersion) certificateInfo.Text = "Sertifika kontrolü tamamlanamadı. Yeniden seçin veya temizleyin.";
+            }
+        }
+
+        private void SetCertificateBusy(bool busy)
+        {
+            selectCertificate.Enabled = !busy;
+            clearCertificate.Enabled = !busy;
+            certificateMode.Enabled = !busy;
+            provider.Enabled = !busy;
+            saveButton.Enabled = !busy;
         }
 
         private void SetCurrentCertificateData(string data)
@@ -357,12 +424,17 @@ namespace Askai
             else draft.LegacyServerCertificate = data;
         }
 
-        private void SaveSettings(object sender, EventArgs e)
+        private async void SaveSettings(object sender, EventArgs e)
         {
+            if (saving || selectingCertificate || resourcesDisposed) return;
+            saving = true;
+            settingsTabs.Enabled = false;
+            saveButton.Enabled = false;
             try
             {
                 if (!string.IsNullOrEmpty(CurrentCertificateData))
-                    ServerCertificateTrust.FromBase64(CurrentCertificateData, CurrentCertificateMode);
+                    await ServerCertificateTrust.FromBase64Async(CurrentCertificateData, CurrentCertificateMode, lifetime.Token);
+                if (resourcesDisposed) return;
                 draft.Provider = (AiProvider)provider.SelectedItem;
                 draft.Model = model.SelectedItem as string ?? "";
                 draft.Token = token.Text.Trim();
@@ -371,13 +443,17 @@ namespace Askai
                 draft.RibbonPreset = (AiRibbonPreset)ribbonPreset.SelectedIndex;
                 draft.MemoryEnabled = memoryEnabled.Checked;
                 draft.MemoryText = memoryText.Text;
-                draft.Save();
+                var saveCancellation = lifetime.Token;
+                await System.Threading.Tasks.Task.Run(() => draft.Save(), saveCancellation);
+                if (resourcesDisposed) return;
                 RibbonPresetSaved?.Invoke((AiRibbonPreset)ribbonPreset.SelectedIndex);
                 DialogResult = DialogResult.OK;
                 Close();
             }
+            catch (OperationCanceledException) { }
             catch (ArgumentException ex) when (ex.ParamName == nameof(AiSettings.MemoryText))
             {
+                if (resourcesDisposed) return;
                 MessageBox.Show("Hafıza en fazla 4.000 karakter olabilir. Metni kısaltıp yeniden kaydedin.",
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 ((TabControl)Controls.Find("SettingsTabs", true)[0]).SelectedTab = (TabPage)memoryText.Parent.Parent;
@@ -385,13 +461,24 @@ namespace Askai
             }
             catch (AiServiceException ex)
             {
+                if (resourcesDisposed) return;
                 MessageBox.Show(ex.Message, "Sunucu sertifikası", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             catch (Exception ex) when (ex is System.IO.IOException || ex is UnauthorizedAccessException
                 || ex is System.Security.Cryptography.CryptographicException)
             {
+                if (resourcesDisposed) return;
                 MessageBox.Show("Ayarlar kaydedilemedi. Kullanıcı profilinin erişilebilir olduğunu kontrol edin.",
                     Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch (Exception)
+            {
+                if (!resourcesDisposed) MessageBox.Show("Ayar işlemi tamamlanamadı. Ayarları yeniden açıp kayıtlı değerleri kontrol edin.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                saving = false;
+                if (!resourcesDisposed) { settingsTabs.Enabled = true; saveButton.Enabled = true; }
             }
         }
     }

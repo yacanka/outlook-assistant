@@ -65,7 +65,7 @@ namespace Ask.ai
 
         private void ApplySavedPreset()
         {
-            try { Apply(AiSettings.Load().RibbonPreset); }
+            try { Apply(AiSettings.LoadRibbonPreset()); }
             catch (InvalidOperationException) { Apply(AiRibbonPreset.Standard); }
         }
 

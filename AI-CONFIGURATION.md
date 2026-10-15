@@ -408,7 +408,7 @@ Markdig **1.4.0**, .NET Framework 4.7.2 ile uyumlu Markdown ayrıştırıcısıd
 standart kütüphanede Markdown ayrıştırıcısı bulunmaz. Elle regex yaklaşımı
 bu kapsamda uyum ve bakım riskini artırır. Paket ve framework bağımlılıkları
 NuGet restore ile gelir; kurulum çıktısına ek assembly’ler dahil olur.
-Yeni bir ağ servisi veya arka plan işlemi eklenmez. Paket sürümü sabittir;
+Yeni bir ağ servisi eklenmez. Paket sürümü sabittir;
 güncellemeler mevcut dönüşüm testleriyle doğrulanmalıdır.
 
 Sertifika kontrollerinden bağımsız ilgili testler:
@@ -448,3 +448,56 @@ Aynı Windows kullanıcısının tüm Outlook hesaplarında geçerlidir; cihazla
 arasında eşitlenmez ve maillerden otomatik öğrenme yapılmaz. Eski ayar
 kayıtları boş hafızayla yüklenir. Şifreli kayıt okunamazsa mevcut güvenli ayar
 hata mesajı gösterilir; ham hafıza hata mesajına veya loga yazılmaz.
+
+## Kaynak sınırları ve arayüz yanıt süresi
+
+İçerik boyutları sessizce kırpılmaz. Desteklenen bir sınır aşılırsa işlem
+maili değiştirmeden açıklayıcı hata verir. Biçimlendirme bütçesi aşılırsa
+yanıtın tamamı, Markdown işaretleri korunarak düz metin biçiminde gösterilir
+ve aktarılır; bu durum onay ekranında belirtilir.
+
+| Alan | Sınır / davranış |
+| --- | --- |
+| AI'a gönderilen kaynak | Gönderen bilgisi dahil 32.000 karakter |
+| AI tarafından üretilen içerik | 64.000 karakter; ağ cevabı ayrıca en fazla 1 MiB |
+| Markdown tablo | En fazla 12 sütun, başlık dahil 200 satır; mailde toplam 2.000 hücre |
+| Üretilen RTF | En fazla 1.048.576 karakter; aşımda tüm içerik düz metne döner |
+| Canlı biçimli önizleme | 12.000 kaynak ve 128.000 RTF karakterine kadar |
+| Büyük canlı önizleme | Metin artımlı gösterilir; tamamlanınca son biçim arka planda hazırlanır |
+| İyileştirme yapılan Word belgesi | En fazla 128.000 karakter |
+| Kaynak mail | Ekler dahil toplam 50 MiB; HTML gövdesi en fazla 1.048.576 karakter, RTF gövdesi 4 MiB |
+| Düzenleme öncesi Word seçim paketi | En fazla 4.194.304 XML karakteri |
+| Kaydedilmiş ayar XML'i | En fazla 4.194.304 karakter; DTD ve dış XML kaynakları kabul edilmez |
+
+Boyut ön kontrolü ve kaynak metin doğrulaması, zengin gövde snapshot'ından
+önce yapılır. Outlook gövde özelliklerini tek parçada verir; gövdeye özel
+sınır, bu COM okumasından sonra uygulanabilir. Toplam mail boyutu kontrolü
+bu okuma için ön koruma sağlar. Değişiklik tespiti için HTML/RTF'nin ikinci
+tam kopyası yerine SHA-256 özeti tutulur; Word metni ayrıca kontrol edilir.
+
+Markdown ayrıştırma ve RTF üretimi arka planda yapılır. Aynı anda tek canlı
+önizleme dönüşümü çalışır; eski metin veya pencere genişliği için hazırlanan
+sonuçlar uygulanmaz. Onay düğmesi, son yanıtın önizlemesi tamamlanmadan
+açılmaz. Son biçimlendirilmiş içerik Outlook aktarımında yeniden kullanılır.
+
+Sertifika seçimi, kayıt doğrulaması ve istek öncesi kontrol UI dışında
+çalışır. Kuyrukta bekleme dahil kontrol için 30 saniye sınırı vardır; kullanıcı
+iptali veya pencerenin kapanması beklemeyi bitirir. Native zincir oluşturucu
+zorla durdurulmaz. Tamamlanana kadar yalnızca bir native kontrol çalıştırılır;
+sonraki işler iptal edilebilir kuyrukta bekler. İstek öncesi sertifika süresi,
+genel AI istek zaman aşımına dahildir. Doğrulanmış değişmez zincir yapısı için
+16 kayıtlık önbellek kullanılır; sertifika tarihleri her kullanımda, gerçek
+sunucu ve iptal durumu ise seçili modun TLS politikasıyla kontrol edilir.
+
+Şerit oluşturulurken yalnız görünüm tercihi okunur; token ve hafıza çözülmez.
+Tercih süreç içinde önbelleğe alınır ve başarılı ayar kaydında güncellenir.
+
+Mevcut taslağı iyileştirme işlemi bir Word özel geri alma kaydında tutulur.
+Kısmi yazma veya paragraf biçimi hatasında canlı Word metni ve seçim XML'i
+karşılaştırılır; yalnız bu düzenleme değişiklik yaptıysa geri alınır. Önceden
+yapılmış kullanıcı düzenlemesi geri alınmaz. Geri alma da başarısız olursa
+kısmi değişiklik olabileceği açıkça bildirilir. Geçici RTF temizleme hatası,
+başarılı aktarımı başarısız sayıp yeni taslağı silmez; içerik/yol loglanmaz.
+Word geri alma API'sinin çalışma biçimi için
+[Microsoft UndoRecord belgesi](https://learn.microsoft.com/en-us/office/vba/word/concepts/working-with-word/working-with-the-undorecord-object)
+temel alınmıştır; gerçek Outlook davranışı Windows üzerinde doğrulanmalıdır.

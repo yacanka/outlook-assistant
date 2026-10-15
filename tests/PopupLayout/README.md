@@ -31,7 +31,8 @@ msbuild tests/PopupLayout/PopupLayoutTests.csproj /t:Restore,Rebuild /verbosity:
 
 Önizleme artık salt okunur RichTextBox kullanır. Testler canlı ve tamamlanmış
 Markdown biçimlerini, satır sonlarını, düz metin hedef önizlemesini ve yeni
-Mail biçimlendirme sekmesini de kapsar. `--settings-only` geçici, sentetik bir
+Görünüm sekmesini, şerit düzeni ve Markdown alanlarının başlıklarla ayrılmasını,
+numarasız preset metinlerini ve açıklayıcı tooltip'leri de kapsar. `--settings-only` geçici, sentetik bir
 ayar dosyasında Markdown seçiminin kaydedilip yeniden yüklenmesini doğrular;
 kullanıcının ayar dosyasına yazmaz. Gerçek RichEdit görünümü ve Outlook RTF
 aktarımının Windows üzerinde ayrıca kontrol edilmesi gerekir.
@@ -74,3 +75,36 @@ ve taslak pencerelerinde, Kaydet/Vazgeç ve yeniden açma ile kontrol edin.
 Gerçek `AiService` yönlendirmesi, her sağlayıcının üç modunda bozuk sertifika
 verisinin ağ çağrısından önce reddedildiğini de doğrular. Sentetik geçici ayar
 dosyaları kullanılır; testler kullanıcının kayıtlı ayarlarını değiştirmez.
+
+## Güvenilirlik regresyonları
+
+Tam platform bağımsız test paketi (native sertifika kontrolleri dahil):
+
+```sh
+dotnet run --project tests/TransportTests.csproj
+```
+
+Sertifika zinciri API'sine erişimin kısıtlandığı ortamlarda yalnız transport,
+formatlama, güvenilirlik, TLS politikası ve Outlook simülasyonlarını çalıştırmak için:
+
+```sh
+dotnet run --project tests/TransportTests.csproj -- --transport-only
+dotnet run --project tests/TransportTests.csproj -- --reliability-only
+```
+
+Bu seçenekler native sunucu/zincir testlerinin yerine geçmez; varsayılan
+komut bu testleri çalıştırmaya devam eder. Regresyonlar seyrek/geniş tabloları,
+satır ve toplam hücre bütçesini, RTF genişlemesini, 64.000 karakter sınırını,
+UTF-8 emojinin 4.096 byte ağ sınırındaki tüm bölünmelerini, çok satırlı JSON
+ve önizleme tamponunda doğrusal bellek tüketimini ve sertifika işinin arka
+planda seri çalışmasını/iptalini kapsar. Kaynak boyutu ön kontrolü, kısmi
+metin/biçim değişikliğinde geri alma ve yazma öncesi hatada eski kullanıcı
+düzenlemesinin geri alınmaması Outlook simülasyonlarıyla doğrulanır.
+
+Windows GUI testleri `SetReadyAsync` tamamlanmasını UI mesaj döngüsüyle bekler;
+büyük canlı önizlemenin düz metne geçmesini, son Markdown biçiminin uygulanmasını
+ve son dönüşüm sırasında kapatılan pencerenin onay verememesini de kontrol eder.
+Windows/Outlook'ta ayrıca aynı metni koruyup yalnız biçimi değiştiren bir
+iyileştirmeyi, Undo/Redo'yu, paragraf ortası seçimi, pencereyi kapatmayı ve
+sertifika kontrolü sürerken servis değiştirmeyi deneyin. Simülasyonlar gerçek
+COM `WordOpenXML` ve özel geri alma kaydının davranışını kanıtlamaz.

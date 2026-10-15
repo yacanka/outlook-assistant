@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="ReliabilityTests.cs" />
     <Compile Include="MailFormattingTests.cs" />
     <Compile Include="../MailFormatting.cs" />
     <Compile Include="MailGenerationTests.cs" />
@@ -27,6 +28,7 @@
     <Compile Include="../AiHttpTransport.cs" />
     <Compile Include="../ServerCertificateTrust.cs" />
     <Compile Include="../CertificateMaterial.cs" />
+    <Compile Include="../CertificateValidation.cs" />
     <Compile Include="../AppConfig.cs" />
     <Compile Include="../AiBrand.cs" />
   </ItemGroup>

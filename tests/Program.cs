@@ -12,6 +12,7 @@ class Program
 {
     static async Task Main(string[] args)
     {
+        if (Array.IndexOf(args, "--reliability-only") >= 0) { await ReliabilityTests.Run(); return; }
         if (Array.IndexOf(args, "--diagnostics-only") >= 0)
         {
             AppConfig.CentralApiUrl = "https://example.invalid/chat";
@@ -24,9 +25,13 @@ class Program
         if (args.Length == 2 && args[0] == "--rtf-fixtures") { MailFormattingTests.WriteFixtures(args[1]); return; }
         if (Array.IndexOf(args, "--mail-only") >= 0) { OutlookAdapterTests.Run(); return; }
         await CheckMemoryTransportAsync();
+        await ReliabilityTests.Run();
         TlsPolicyTests.Run();
-        ServerCertificateTests.Run();
-        CertificateChainTests.Run();
+        if (Array.IndexOf(args, "--transport-only") < 0)
+        {
+            ServerCertificateTests.Run();
+            CertificateChainTests.Run();
+        }
         OutlookAdapterTests.Run();
         await LegacyTransportTests.Run();
         AppConfig.CentralApiUrl = "https://example.invalid/chat";

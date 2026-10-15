@@ -72,7 +72,8 @@ namespace Ask.ai
                     cancellation.Token.ThrowIfCancellationRequested();
                     if (!session.Complete(result)) return;
                     setStage(MailActionStage.Preview);
-                    progress.SetReady(result);
+                    await progress.SetReadyAsync(result);
+                    target.SetPreparedContent(result, progress.PreparedContent);
                     setStage(MailActionStage.Approval);
                     if (!await progress.WaitForApprovalAsync()) { session.Cancel(); return; }
                     cancellation.Token.ThrowIfCancellationRequested();

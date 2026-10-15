@@ -4,6 +4,9 @@ using System.Linq;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Askai
 {
@@ -21,6 +24,11 @@ namespace Askai
         private readonly byte[] pinnedServer;
         private readonly byte[] trustedRoot;
         private readonly bool legacySingleLeaf;
+        private readonly DateTime validFrom;
+        private readonly DateTime validUntil;
+        private static readonly object cacheLock = new object();
+        private static readonly Dictionary<string, ServerCertificateTrust> cache = new Dictionary<string, ServerCertificateTrust>(StringComparer.Ordinal);
+        private static readonly Queue<string> cacheOrder = new Queue<string>();
         public CertificateTrustMode Mode { get; }
         public bool CheckRevocation => Mode != CertificateTrustMode.CertificateBundle;
         public int CertificateCount => material.Count;
@@ -42,6 +50,9 @@ namespace Askai
                 var requiredCertificates = mode == CertificateTrustMode.CertificateBundle
                     ? certificates.Where(IsAuthority).ToArray() : certificates;
                 foreach (var certificate in requiredCertificates) RequireCurrent(certificate);
+                if (requiredCertificates.Length == 0) throw InvalidChain();
+                validFrom = requiredCertificates.Max(certificate => certificate.NotBefore.ToUniversalTime());
+                validUntil = requiredCertificates.Min(certificate => certificate.NotAfter.ToUniversalTime());
                 if (legacySingleLeaf)
                 {
                     if (IsAuthority(certificates[0]))
@@ -96,7 +107,38 @@ namespace Askai
         }
         public static ServerCertificateTrust FromBase64(string encoded, CertificateTrustMode mode = CertificateTrustMode.ServerCertificate)
         {
-            return Create(CertificateMaterial.FromBase64(encoded), mode);
+            // Cache only immutable topology/signature validation. Live TLS validation and
+            // revocation still run under the selected policy; expiry is checked on every use.
+            string key = mode + ":" + encoded;
+            ServerCertificateTrust trust;
+            lock (cacheLock) cache.TryGetValue(key, out trust);
+            if (trust == null)
+            {
+                trust = Create(CertificateMaterial.FromBase64(encoded), mode);
+                lock (cacheLock)
+                {
+                    if (!cache.ContainsKey(key))
+                    {
+                        if (cache.Count >= 16) cache.Remove(cacheOrder.Dequeue());
+                        cache.Add(key, trust);
+                        cacheOrder.Enqueue(key);
+                    }
+                }
+            }
+            DateTime now = DateTime.UtcNow;
+            if (now < trust.validFrom || now > trust.validUntil)
+                throw new AiServiceException("Sertifikalardan biri henüz geçerli değil veya süresi dolmuş. Geçerli zinciri seçin ve Windows saatini kontrol edin.");
+            return trust;
+        }
+
+        internal static Task<ServerCertificateTrust> FromBase64Async(string encoded, CertificateTrustMode mode, CancellationToken token)
+        {
+            return CertificateValidation.RunAsync(() => FromBase64(encoded, mode), token);
+        }
+
+        internal static Task<ServerCertificateTrust> FromFilesAsync(string[] paths, CertificateTrustMode mode, CancellationToken token)
+        {
+            return CertificateValidation.RunAsync(() => FromFiles(paths, mode), token);
         }
 
         private static ServerCertificateTrust Create(CertificateMaterial material, CertificateTrustMode mode)
