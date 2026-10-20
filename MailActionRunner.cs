@@ -26,10 +26,7 @@ namespace Ask.ai
                     var settings = AiSettings.Load();
                     target.ApplyMarkdown = settings.ApplyMarkdown;
                     stage = MailActionStage.Input;
-                    var request = ReadRequest(capability, target);
-                    if (request == null) return;
-                    stage = MailActionStage.Preparing;
-                    await PrepareAndApplyAsync(request, target, settings, value => stage = value);
+                    await ReadRequestAndPrepareAsync(capability, target, settings, value => stage = value);
                 }
             }
             catch (MailActionException ex) { ShowError(ex.Message); }
@@ -43,26 +40,39 @@ namespace Ask.ai
             finally { Volatile.Write(ref running, 0); }
         }
 
-        private static MailGenerationRequest ReadRequest(MailCapability capability, OutlookMailTarget target)
+        private static async Task ReadRequestAndPrepareAsync(MailCapability capability, OutlookMailTarget target, AiSettings settings,
+            Action<MailActionStage> setStage)
         {
             if (capability == MailCapability.Improve)
-                return new MailGenerationRequest(capability, target.Subject, target.Source, "", target.ApplyMarkdown);
+            {
+                var request = new MailGenerationRequest(capability, target.Subject, target.Source, "", target.ApplyMarkdown);
+                await PrepareAndApplyAsync(request, target, settings, setStage);
+                return;
+            }
             bool composing = capability == MailCapability.Compose;
             using (var input = new MailInputForm(composing, capability == MailCapability.ReplyAll, target.Subject))
             {
-                if (input.ShowDialog() != DialogResult.OK) return null;
-                if (composing) target.SetNewSubject(input.MailSubject);
-                return new MailGenerationRequest(capability, target.Subject, target.Source, input.Instructions, target.ApplyMarkdown);
+                // Reuse the dialog so Back preserves the exact text and editing state.
+                while (input.ShowDialog() == DialogResult.OK)
+                {
+                    if (composing) target.SetNewSubject(input.MailSubject);
+                    var request = new MailGenerationRequest(capability, target.Subject, target.Source, input.Instructions, target.ApplyMarkdown);
+                    if (!await PrepareAndApplyAsync(request, target, settings, setStage)) return;
+                    setStage(MailActionStage.Input);
+                }
             }
         }
 
-        private static async Task PrepareAndApplyAsync(MailGenerationRequest request, OutlookMailTarget target, AiSettings settings,
+        // Returns true only when the user explicitly asks to edit the prompt again.
+        private static async Task<bool> PrepareAndApplyAsync(MailGenerationRequest request, OutlookMailTarget target, AiSettings settings,
             Action<MailActionStage> setStage)
         {
+            setStage(MailActionStage.Preparing);
             string prompt = request.BuildPrompt(settings.MemoryEnabled ? settings.MemoryText : null);
             var session = new MailGenerationSession();
             using (var cancellation = new CancellationTokenSource())
-            using (var progress = new ProgressForm(cancellation, GetTitle(request.Capability), GetApprovalMessage(request.Capability), request.ApplyMarkdown, target.SupportsRichText))
+            using (var progress = new ProgressForm(cancellation, GetTitle(request.Capability), GetApprovalMessage(request.Capability),
+                request.ApplyMarkdown, target.SupportsRichText, allowBack: request.Capability != MailCapability.Improve))
             {
                 progress.Show();
                 try
@@ -70,14 +80,14 @@ namespace Ask.ai
                     setStage(MailActionStage.Request);
                     string result = await new AiService().SendStreamingRequestAsync(prompt, progress.ReportChunk, cancellation.Token, settings);
                     cancellation.Token.ThrowIfCancellationRequested();
-                    if (!session.Complete(result)) return;
+                    if (!session.Complete(result)) return false;
                     setStage(MailActionStage.Preview);
                     await progress.SetReadyAsync(result);
-                    target.SetPreparedContent(result, progress.PreparedContent);
                     setStage(MailActionStage.Approval);
-                    if (!await progress.WaitForApprovalAsync()) { session.Cancel(); return; }
+                    if (!await progress.WaitForApprovalAsync()) { session.Cancel(); return progress.BackRequested; }
                     cancellation.Token.ThrowIfCancellationRequested();
                     setStage(MailActionStage.Applying);
+                    target.SetPreparedContent(result, progress.PreparedContent);
                     session.ApplyApproved(target);
                 }
                 catch (OperationCanceledException) { session.Cancel(); }
@@ -89,6 +99,7 @@ namespace Ask.ai
                 catch { session.Fail(); throw; }
                 finally { progress.FinishAndClose(); }
             }
+            return false;
         }
 
         private static string GetTitle(MailCapability capability)

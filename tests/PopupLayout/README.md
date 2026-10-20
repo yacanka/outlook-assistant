@@ -11,6 +11,14 @@ Testler gerçek WinForms kontrollerini kullanır; Outlook veya VSTO gerektirmez.
 
 macOS Mono'nun Carbon WinForms sürücüsü bu testleri çalıştırmak için uygun değildir. Derleme kontrolü görsel doğrulamanın yerine geçmez. Windows'ta ayrıca Outlook içinden üç popup'ı %100, %150 ve %200 ekran ölçeklerinde açın; pencereyi daraltıp genişletin, açıklamalar ile düğmelerin kırpılmadığını ve küçük yükseklikte dikey kaydırmayla erişilebilir olduğunu kontrol edin.
 
+“Geri” regresyonları düğmenin yalnız önizleme hazırken etkinleşmesini,
+geri/iptal/kapatmanın aktarımı onaylamamasını, aktarım başladıktan sonra geri
+dönülememesini ve yeniden açılan giriş penceresinde konu ile çok satırlı
+talimatın korunup düzenlenebilmesini kapsar. Windows/Outlook'ta Mail Hazırla,
+Yanıtla ve Tümünü Yanıtla için art arda Geri → promptu düzenle → Hazırla
+adımlarını deneyin; yalnız son onaylanan yanıtın bir kez aktarıldığını kontrol
+edin. Prompt ekranı olmayan Seçili Metni İyileştir akışında Geri gösterilmez.
+
 Ayarlar penceresi de bu projede gerçek üretim sınıfıyla derlenir. GUI açmadan
 üç sertifika modunun veri seçimini, paket temizlemenin diğer modları
 etkilemediğini ve gömülü ikonun pencere/şerit boyutlarında yüklenmesini

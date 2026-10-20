@@ -24,6 +24,8 @@ internal static class PopupLayoutTests
             return;
         }
         Application.EnableVisualStyles();
+        CheckBackNavigation();
+        CheckPromptReopening();
         CheckModelChoices();
         CheckSettingsForm();
         using (var input = new MailInputForm(false, true, "Örnek konu"))
@@ -136,6 +138,92 @@ internal static class PopupLayoutTests
         Task task = progress.SetReadyAsync(result);
         PumpUntil(() => task.IsCompleted);
         task.GetAwaiter().GetResult();
+    }
+
+    private static void CheckBackNavigation()
+    {
+        foreach (string choice in new[] { "&Geri", "&Vazgeç", "&Mail’e aktar", "Close" })
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Test", "Test", false, true, allowBack: true))
+        {
+            progress.Show();
+            var back = FindButton(progress, "&Geri");
+            Check(back != null && back.Visible && !back.Enabled, "Back is visible but unavailable while generating.");
+            back.PerformClick();
+            Check(!progress.WaitForApprovalAsync().IsCompleted && !progress.BackRequested,
+                "Back cannot interrupt generation or resolve approval before the preview is ready.");
+            Ready(progress, "Prepared response");
+            Check(back.Enabled && progress.AcceptButton == null, "Back becomes available without making Enter approve the response.");
+            CheckSizes(progress);
+            progress.Scale(new SizeF(1.5f, 1.5f));
+            CheckSizes(progress);
+            if (choice == "Close") progress.Close();
+            else FindButton(progress, choice).PerformClick();
+            Check(progress.BackRequested == (choice == "&Geri"), "Only Back requests a return to the prompt.");
+            Check(progress.WaitForApprovalAsync().GetAwaiter().GetResult() == (choice == "&Mail’e aktar"),
+                "Back, cancel and closing cannot approve content.");
+            if (choice == "&Mail’e aktar")
+            {
+                Check(!back.Enabled, "Back cannot change the decision once applying starts.");
+                back.PerformClick();
+                Check(!progress.BackRequested && !cancellation.IsCancellationRequested,
+                    "An approved transfer cannot be changed into navigation.");
+            }
+            progress.FinishAndClose();
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Improve", "Test"))
+        {
+            progress.Show();
+            Ready(progress, "Improved selection");
+            Check(!FindButton(progress, "&Geri").Visible, "Flows without a prompt screen do not offer Back.");
+            progress.FinishAndClose();
+        }
+    }
+
+    private static void CheckPromptReopening()
+    {
+        foreach (bool composing in new[] { true, false })
+        using (var input = new MailInputForm(composing, !composing, "Original subject"))
+        {
+            var fields = input.Controls[0].Controls;
+            TextBox subject = null;
+            TextBox instructions = null;
+            foreach (Control control in fields)
+            {
+                var text = control as TextBox;
+                if (text == null) continue;
+                if (text.Multiline) instructions = text;
+                else subject = text;
+            }
+            using (var timer = new System.Windows.Forms.Timer { Interval = 50 })
+            {
+                int visit = 0;
+                timer.Tick += (sender, args) =>
+                {
+                    timer.Stop();
+                    if (visit == 0)
+                    {
+                        if (composing) subject.Text = "Updated subject";
+                        instructions.Text = "  First prompt\r\nSecond line  ";
+                    }
+                    else
+                    {
+                        Check(subject.Text == (composing ? "Updated subject" : "Original subject"), "Returning preserves the subject.");
+                        Check(instructions.Text == "  First prompt\r\nSecond line  ", "Returning preserves the exact prompt, including whitespace.");
+                        Check(subject.ReadOnly == !composing, "Returning does not make a reply subject editable.");
+                        instructions.Text = "Revised prompt";
+                    }
+                    visit++;
+                    FindButton(input, "&Hazırla").PerformClick();
+                };
+                timer.Start();
+                Check(input.ShowDialog() == DialogResult.OK, "The first prompt can be submitted.");
+                timer.Start();
+                Check(input.ShowDialog() == DialogResult.OK && input.Instructions == "Revised prompt",
+                    "The same input window can submit a revised prompt after going back.");
+            }
+        }
     }
 
     private static void PumpUntil(Func<bool> complete)

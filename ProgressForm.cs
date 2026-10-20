@@ -19,6 +19,7 @@ namespace Ask.ai
         private readonly ProgressBar progress = new ProgressBar { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee };
         private readonly Button apply = new Button { Text = "&Mail’e aktar", AutoSize = true, Enabled = false };
         private readonly Button cancel = new Button { Text = "&İptal", AutoSize = true };
+        private readonly Button back = new Button { Text = "&Geri", AutoSize = true, Enabled = false };
         private readonly System.Windows.Forms.Timer statusTimer;
         private readonly RichTextBox preview = new RichTextBox
         {
@@ -44,8 +45,12 @@ namespace Ask.ai
         private bool completing;
         private bool ready;
         internal FormattedMailContent PreparedContent { get; private set; }
+        internal bool BackRequested { get; private set; }
 
         public ProgressForm(CancellationTokenSource cancellation, string title, string approvalMessage, bool applyMarkdown = false, bool supportsRichText = true)
+            : this(cancellation, title, approvalMessage, applyMarkdown, supportsRichText, false) { }
+
+        internal ProgressForm(CancellationTokenSource cancellation, string title, string approvalMessage, bool applyMarkdown, bool supportsRichText, bool allowBack)
         {
             this.applyMarkdown = applyMarkdown;
             this.supportsRichText = supportsRichText;
@@ -89,15 +94,24 @@ namespace Ask.ai
             var buttons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(apply);
+            back.Visible = allowBack;
+            buttons.Controls.Add(back);
             layout.Controls.Add(buttons, 0, 6);
             Controls.Add(layout);
             CancelButton = cancel;
             cancel.Click += (sender, args) => Close();
+            back.Click += (sender, args) =>
+            {
+                if (!back.Enabled || cancellation.IsCancellationRequested || applying) return;
+                BackRequested = true;
+                Close();
+            };
             apply.Click += (sender, args) =>
             {
                 if (!apply.Enabled || cancellation.IsCancellationRequested) return;
                 apply.Enabled = false;
                 cancel.Enabled = false;
+                back.Enabled = false;
                 applying = true;
                 status.Text = "Onay alındı; içerik Outlook’a aktarılıyor…";
                 approval.TrySetResult(true);
@@ -305,6 +319,7 @@ namespace Ask.ai
                 status.Text += " Biçimlendirme sınırı nedeniyle içerik kesilmeden düz metin olarak gösteriliyor ve aktarılacak.";
             cancel.Text = "&Vazgeç";
             apply.Enabled = true;
+            back.Enabled = true;
             ready = true;
             // No default AcceptButton: finishing generation must not turn an accidental Enter into approval.
         }
