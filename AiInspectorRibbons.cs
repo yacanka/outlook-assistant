@@ -37,6 +37,8 @@ namespace Ask.ai
                     "Taslakta seçtiğiniz metni bağlamını koruyarak iyileştirir. Onayınızla yalnızca seçilen alanı değiştirir.");
             else
             {
+                AddCapability(group, "btnAiReadSummarize", "Özetle", "ReviewShowMarkup", MailCapability.Summarize,
+                    "Mailin özetini, aksiyonlarını ve açık sorularını gösterir; maili değiştirmez.", large: false);
                 reply = AddCapability(group, "btnAiReadReply", "Yanıtla", "Reply", MailCapability.Reply,
                     "Bu mail için yanıt hazırlar. Onayınızla Outlook taslağı açılır; mail gönderilmez.");
                 replyAll = AddCapability(group, "btnAiReadReplyAll", "Tümünü Yanıtla", "ReplyAll", MailCapability.ReplyAll,

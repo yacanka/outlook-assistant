@@ -26,10 +26,7 @@ namespace Ask.ai
                     var settings = AiSettings.Load();
                     target.ApplyMarkdown = settings.ApplyMarkdown;
                     stage = MailActionStage.Input;
-                    var request = ReadRequest(capability, target);
-                    if (request == null) return;
-                    stage = MailActionStage.Preparing;
-                    await PrepareAndApplyAsync(request, target, settings, value => stage = value);
+                    await ReadRequestAndPrepareAsync(capability, target, settings, value => stage = value);
                 }
             }
             catch (MailActionException ex) { ShowError(ex.Message); }
@@ -43,41 +40,63 @@ namespace Ask.ai
             finally { Volatile.Write(ref running, 0); }
         }
 
-        private static MailGenerationRequest ReadRequest(MailCapability capability, OutlookMailTarget target)
+        private static async Task ReadRequestAndPrepareAsync(MailCapability capability, OutlookMailTarget target, AiSettings settings,
+            Action<MailActionStage> setStage)
         {
-            if (capability == MailCapability.Improve)
-                return new MailGenerationRequest(capability, target.Subject, target.Source, "", target.ApplyMarkdown);
-            bool composing = capability == MailCapability.Compose;
-            using (var input = new MailInputForm(composing, capability == MailCapability.ReplyAll, target.Subject))
+            if (capability == MailCapability.Improve || capability == MailCapability.Summarize)
             {
-                if (input.ShowDialog() != DialogResult.OK) return null;
-                if (composing) target.SetNewSubject(input.MailSubject);
-                return new MailGenerationRequest(capability, target.Subject, target.Source, input.Instructions, target.ApplyMarkdown);
+                var request = new MailGenerationRequest(capability, target.Subject, target.Source, "", target.ApplyMarkdown);
+                await PrepareAndApplyAsync(request, target, settings, setStage);
+                return;
+            }
+            bool composing = capability == MailCapability.Compose;
+            using (var input = new MailInputForm(composing, capability == MailCapability.ReplyAll, target.Subject, settings.Skills))
+            {
+                // Reuse the dialog so Back preserves the exact text and editing state.
+                while (input.ShowDialog() == DialogResult.OK)
+                {
+                    if (composing) target.SetNewSubject(input.MailSubject);
+                    var request = new MailGenerationRequest(capability, target.Subject, target.Source, input.Instructions, target.ApplyMarkdown);
+                    if (!await PrepareAndApplyAsync(request, target, settings, setStage)) return;
+                    setStage(MailActionStage.Input);
+                }
             }
         }
 
-        private static async Task PrepareAndApplyAsync(MailGenerationRequest request, OutlookMailTarget target, AiSettings settings,
+        // Returns true only when the user explicitly asks to edit the prompt again.
+        private static async Task<bool> PrepareAndApplyAsync(MailGenerationRequest request, OutlookMailTarget target, AiSettings settings,
             Action<MailActionStage> setStage)
         {
+            setStage(MailActionStage.Preparing);
             string prompt = request.BuildPrompt(settings.MemoryEnabled ? settings.MemoryText : null);
             var session = new MailGenerationSession();
             using (var cancellation = new CancellationTokenSource())
-            using (var progress = new ProgressForm(cancellation, GetTitle(request.Capability), GetApprovalMessage(request.Capability), request.ApplyMarkdown, target.SupportsRichText))
+            using (var progress = new ProgressForm(cancellation, GetTitle(request.Capability), GetApprovalMessage(request.Capability),
+                request.ApplyMarkdown, request.Capability == MailCapability.Summarize || target.SupportsRichText,
+                allowBack: request.Capability != MailCapability.Improve && request.Capability != MailCapability.Summarize))
             {
+                if (request.Capability == MailCapability.Summarize) progress.ConfigureSummary();
+                else progress.ConfigureRevisions((current, instruction, token) => new AiService().SendStreamingRequestAsync(
+                    request.BuildRevisionPrompt(current, instruction, settings.MemoryEnabled ? settings.MemoryText : null), null, token, settings));
                 progress.Show();
                 try
                 {
                     setStage(MailActionStage.Request);
                     string result = await new AiService().SendStreamingRequestAsync(prompt, progress.ReportChunk, cancellation.Token, settings);
                     cancellation.Token.ThrowIfCancellationRequested();
-                    if (!session.Complete(result)) return;
+                    // Initial and revised results remain local until the final explicit transfer.
+                    if (string.IsNullOrWhiteSpace(result) || result.Length > MailContentLimits.GeneratedCharacters)
+                        throw new MailActionException("Üretilen içerik boş veya çok uzun.");
                     setStage(MailActionStage.Preview);
                     await progress.SetReadyAsync(result);
-                    target.SetPreparedContent(result, progress.PreparedContent);
                     setStage(MailActionStage.Approval);
-                    if (!await progress.WaitForApprovalAsync()) { session.Cancel(); return; }
+                    if (!await progress.WaitForApprovalAsync()) { session.Cancel(); return progress.BackRequested; }
                     cancellation.Token.ThrowIfCancellationRequested();
+                    if (request.Capability == MailCapability.Summarize) return false;
+                    result = progress.SelectedResult;
+                    if (!session.Complete(result)) return false;
                     setStage(MailActionStage.Applying);
+                    target.SetPreparedContent(result, progress.PreparedContent);
                     session.ApplyApproved(target);
                 }
                 catch (OperationCanceledException) { session.Cancel(); }
@@ -89,10 +108,12 @@ namespace Ask.ai
                 catch { session.Fail(); throw; }
                 finally { progress.FinishAndClose(); }
             }
+            return false;
         }
 
         private static string GetTitle(MailCapability capability)
         {
+            if (capability == MailCapability.Summarize) return "Mail özetleniyor";
             if (capability == MailCapability.Compose) return "Yeni mail hazırlanıyor";
             if (capability == MailCapability.Improve) return "Seçili metin iyileştiriliyor";
             return "Mail yanıtı hazırlanıyor";
@@ -102,6 +123,7 @@ namespace Ask.ai
         {
             switch (capability)
             {
+                case MailCapability.Summarize: return "Özet, aksiyonlar ve açık sorular gösterilir. Belirtilmeyen bilgiler tahmin edilmez; kaynak mail değiştirilmez.";
                 case MailCapability.Compose: return "Onayınızla yeni bir Outlook maili açılacak ve hazırlanan içerik imzanızın önüne eklenecek.";
                 case MailCapability.Improve: return "Onayınızla başlangıçta seçtiğiniz metin değiştirilecek. Seçimin dışındaki imza ve yazışmalar korunacak.";
                 case MailCapability.ReplyAll: return "Onayınızla Outlook’un tümünü yanıtla taslağı açılacak. Göndermeden önce alıcıları ve metni kontrol edin.";

@@ -22,6 +22,7 @@ namespace Askai
         public AiRibbonPreset RibbonPreset { get; set; } = AiRibbonPreset.Standard;
         /// <summary>Personal context, encrypted for the current Windows user when saved.</summary>
         public string MemoryText { get; set; } = "";
+        public System.Collections.Generic.List<AiSkill> Skills { get; set; } = AiSkillCatalog.Defaults();
         public bool MemoryEnabled { get; set; } = true;
         public string CentralServerCertificate { get; set; } = "";
         public string CentralCaCertificates { get; set; } = "";
@@ -86,7 +87,11 @@ namespace Askai
                 string memory = encryptedMemory.Length == 0 ? "" : Encoding.UTF8.GetString(ProtectedData.Unprotect(
                     Convert.FromBase64String(encryptedMemory), null, DataProtectionScope.CurrentUser));
                 if (memory.Length > AppConfig.MemoryMaxLength) throw new FormatException();
+                string encryptedSkills = (string)root.Element("Skills");
+                var skills = encryptedSkills == null ? AiSkillCatalog.Defaults() : AiSkillCatalog.Deserialize(
+                    Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(encryptedSkills), null, DataProtectionScope.CurrentUser)));
                 return new AiSettings {
+                    Skills = skills,
                     Provider = provider,
                     Model = (string)root.Element("Model") ?? "",
                     UseTls12 = (bool?)root.Element("UseTls12") ?? false,
@@ -107,7 +112,7 @@ namespace Askai
                 };
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException
-                || ex is CryptographicException || ex is FormatException || ex is System.Xml.XmlException)
+                || ex is CryptographicException || ex is ArgumentException || ex is FormatException || ex is System.Xml.XmlException)
             {
                 throw new InvalidOperationException("AI ayarları okunamadı. AI Asistan ayarlarından yeniden kaydedin.");
             }
@@ -119,6 +124,8 @@ namespace Askai
         {
             if ((MemoryText ?? "").Length > AppConfig.MemoryMaxLength)
                 throw new ArgumentException("Hafıza en fazla 4.000 karakter olabilir. Metni kısaltıp yeniden kaydedin.", nameof(MemoryText));
+            string encryptedSkills = Convert.ToBase64String(ProtectedData.Protect(
+                Encoding.UTF8.GetBytes(AiSkillCatalog.Serialize(Skills)), null, DataProtectionScope.CurrentUser));
             string encryptedMemory = string.IsNullOrEmpty(MemoryText) ? "" : Convert.ToBase64String(
                 ProtectedData.Protect(Encoding.UTF8.GetBytes(MemoryText), null, DataProtectionScope.CurrentUser));
             string encrypted = string.IsNullOrEmpty(Token) ? "" : Convert.ToBase64String(
@@ -130,6 +137,7 @@ namespace Askai
                 new XElement("RibbonPreset", RibbonPreset),
                 new XElement("MemoryEnabled", MemoryEnabled),
                 new XElement("MemoryText", encryptedMemory),
+                new XElement("Skills", encryptedSkills),
                 new XElement("CentralServerCertificate", CentralServerCertificate),
                 new XElement("CentralCaCertificates", CentralCaCertificates),
                 new XElement("CentralBundleCertificates", CentralBundleCertificates),

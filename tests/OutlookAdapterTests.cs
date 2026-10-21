@@ -7,6 +7,14 @@ internal static class OutlookAdapterTests
 {
     public static void Run()
     {
+        var summaryApp = new Outlook.Application();
+        var summaryMail = new Outlook.MailItem(summaryApp) { Sent = true, Subject = "Topic", Body = "Original" };
+        using (var summaryTarget = OutlookMailTarget.Capture(summaryApp, summaryMail.GetInspector, MailCapability.Summarize))
+        {
+            try { summaryTarget.Apply("Summary"); throw new Exception("Summary must never create a draft."); }
+            catch (MailActionException) { }
+            Check(summaryApp.Created.Count == 0 && summaryMail.Body == "Original", "Summary is read-only even on accidental transfer.");
+        }
         CheckSourceBounds();
         CheckRollback();
         var app = new Outlook.Application();

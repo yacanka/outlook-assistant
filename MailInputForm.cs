@@ -15,7 +15,7 @@ namespace Ask.ai
         public string MailSubject => subject.Text.Trim();
         public string Instructions => instructions.Text.Trim();
 
-        public MailInputForm(bool composing, bool replyAll, string sourceSubject)
+        public MailInputForm(bool composing, bool replyAll, string sourceSubject, System.Collections.Generic.IList<Askai.AiSkill> skills = null)
         {
             Text = composing ? "Mail Hazırla" : replyAll ? "Tümünü Yanıtla" : "Yanıtla";
             Icon = AssistantIcon.WindowIcon;
@@ -29,7 +29,7 @@ namespace Ask.ai
             MaximizeBox = false;
             subject.Text = sourceSubject;
             subject.ReadOnly = !composing;
-            var layout = new ResponsiveTableLayoutPanel { Padding = new Padding(20), ColumnCount = 1, RowCount = 7 };
+            var layout = new ResponsiveTableLayoutPanel { Padding = new Padding(20), ColumnCount = 1, RowCount = 8 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             instructions.MinimumSize = new Size(0, 100);
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -60,7 +60,26 @@ namespace Ask.ai
             var prepare = new Button { Text = "&Hazırla", AutoSize = true };
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(prepare);
-            layout.Controls.Add(buttons, 0, 6);
+            layout.Controls.Add(buttons, 0, 7);
+            var skillRow = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+            var selector = new ComboBox { Name = "SkillSelector", DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
+            selector.Items.Add("Beceri seçin…");
+            if (skills != null) foreach (var skill in skills) selector.Items.Add(skill);
+            selector.SelectedIndex = 0;
+            var useSkill = new Button { Text = "Talimatı ekle", AutoSize = true };
+            useSkill.Click += (sender, args) =>
+            {
+                var selected = selector.SelectedItem as Askai.AiSkill;
+                if (selected == null) return;
+                string combined = string.IsNullOrWhiteSpace(instructions.Text) ? selected.Instructions : instructions.Text + "\r\n" + selected.Instructions;
+                if (combined.Length > 4000) { error.Text = "Birleşik talimat 4.000 karakteri aşıyor."; return; }
+                instructions.Text = combined;
+                error.Text = "";
+            };
+            skillRow.Controls.Add(selector);
+            skillRow.Controls.Add(useSkill);
+            layout.Controls.Add(skillRow, 0, 6);
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Controls.Add(layout);
             CancelButton = cancel;
             prepare.Click += (sender, args) =>

@@ -52,6 +52,8 @@ namespace Askai
         private string CurrentCertificateData => certificateProvider == AiProvider.Central
             ? draft.ActiveCentralCertificate : draft.ActiveLegacyCertificate;
 
+        private readonly Ask.ai.SkillLibraryControl skillLibrary = new Ask.ai.SkillLibraryControl();
+
         public AiSettingsForm()
         {
             Text = AiBrand.Name + " — Ayarlar";
@@ -97,6 +99,9 @@ namespace Askai
             var memoryPage = new TabPage("Hafıza") { BackColor = SystemColors.Window };
             tabs.TabPages.Add(memoryPage);
             BuildMemoryPage(memoryPage);
+            var skillsPage = new TabPage("Beceriler") { BackColor = SystemColors.Window };
+            tabs.TabPages.Add(skillsPage);
+            skillsPage.Controls.Add(skillLibrary);
 
             var actions = new FlowLayoutPanel
             {
@@ -141,6 +146,7 @@ namespace Askai
             ribbonPreset.SelectedIndex = (int)settings.RibbonPreset;
             memoryEnabled.Checked = settings.MemoryEnabled;
             memoryText.Text = settings.MemoryText;
+            skillLibrary.Skills = settings.Skills;
             UpdateMemoryCount();
             certificateMode.SelectedIndexChanged += (sender, args) =>
             {
@@ -443,6 +449,7 @@ namespace Askai
                 draft.RibbonPreset = (AiRibbonPreset)ribbonPreset.SelectedIndex;
                 draft.MemoryEnabled = memoryEnabled.Checked;
                 draft.MemoryText = memoryText.Text;
+                draft.Skills = skillLibrary.Skills;
                 var saveCancellation = lifetime.Token;
                 await System.Threading.Tasks.Task.Run(() => draft.Save(), saveCancellation);
                 if (resourcesDisposed) return;

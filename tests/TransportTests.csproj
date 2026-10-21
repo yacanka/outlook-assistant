@@ -23,6 +23,7 @@
     <Compile Include="CertificateChainTests.cs" />
     <Compile Include="../LegacyAiService.cs" />
     <Compile Include="../MailGeneration.cs" />
+    <Compile Include="../AiSkill.cs" />
     <Compile Include="../CentralAiService.cs" />
     <Compile Include="../AiConnectionErrors.cs" />
     <Compile Include="../AiHttpTransport.cs" />

@@ -11,6 +11,14 @@ Testler gerçek WinForms kontrollerini kullanır; Outlook veya VSTO gerektirmez.
 
 macOS Mono'nun Carbon WinForms sürücüsü bu testleri çalıştırmak için uygun değildir. Derleme kontrolü görsel doğrulamanın yerine geçmez. Windows'ta ayrıca Outlook içinden üç popup'ı %100, %150 ve %200 ekran ölçeklerinde açın; pencereyi daraltıp genişletin, açıklamalar ile düğmelerin kırpılmadığını ve küçük yükseklikte dikey kaydırmayla erişilebilir olduğunu kontrol edin.
 
+“Geri” regresyonları düğmenin yalnız önizleme hazırken etkinleşmesini,
+geri/iptal/kapatmanın aktarımı onaylamamasını, aktarım başladıktan sonra geri
+dönülememesini ve yeniden açılan giriş penceresinde konu ile çok satırlı
+talimatın korunup düzenlenebilmesini kapsar. Windows/Outlook'ta Mail Hazırla,
+Yanıtla ve Tümünü Yanıtla için art arda Geri → promptu düzenle → Hazırla
+adımlarını deneyin; yalnız son onaylanan yanıtın bir kez aktarıldığını kontrol
+edin. Prompt ekranı olmayan Seçili Metni İyileştir akışında Geri gösterilmez.
+
 Ayarlar penceresi de bu projede gerçek üretim sınıfıyla derlenir. GUI açmadan
 üç sertifika modunun veri seçimini, paket temizlemenin diğer modları
 etkilemediğini ve gömülü ikonun pencere/şerit boyutlarında yüklenmesini
@@ -108,3 +116,40 @@ Windows/Outlook'ta ayrıca aynı metni koruyup yalnız biçimi değiştiren bir
 iyileştirmeyi, Undo/Redo'yu, paragraf ortası seçimi, pencereyi kapatmayı ve
 sertifika kontrolü sürerken servis değiştirmeyi deneyin. Simülasyonlar gerçek
 COM `WordOpenXML` ve özel geri alma kaydının davranışını kanıtlamaz.
+
+## Özetleme, revizyon ve beceriler
+
+`--settings-only` ayrıca beceri kütüphanesinin şifreli kaydetme/yükleme,
+boş kütüphaneyi koruma ve bozuk kaydı reddetme davranışını kontrol eder.
+Şerit simülasyonu ana penceredeki Özetle düğmesinin doğru bağlamı ilettiğini
+ve okuma penceresinde de göründüğünü doğrular.
+
+Tam Windows UI paketi revizyon sürerken aktarımın kilitlenmesini, başarılı
+revizyon ve önceki sürümün doğru gösterilmesini, hata halinde eski metnin
+korunmasını, kapanıştan sonra geç gelen sonucun atılmasını ve özetlemenin
+aktarım sunmamasını kapsar. Beceri seçiminden talimata ekleme ve ayar taslağında
+silme de kontrol edilir. Outlook'ta ayrıca Markdown açık/kapalı revizyon →
+önceki sürüm → aktar akışını ve beceri düzenleme → Kaydet/Vazgeç → yeniden
+açma davranışını doğrulayın.
+
+
+## Assembly yönlendirmesi regresyonu
+
+Proje üzerinden Rebuild sonrası, GUI açmadan yalnız bağımlılık doğrulaması:
+
+```sh
+mono tests/PopupLayout/bin/PopupLayoutTests.exe --bindings-only
+```
+
+Windows'ta aynı exe'yi doğrudan `--bindings-only` ile çalıştırın. Bu kontrol
+normal `--settings-only` ve tam UI çalıştırmasının da başında çalışır.
+`System.Text.Json` içindeki gerçek `System.Memory` referansı, çıktıdaki DLL,
+üretilen config ve çalışma zamanındaki yükleme sonucu karşılaştırılır.
+JSON ve Markdown da aynı süreçte kullanılır. Config'siz kopya geçerli bir
+test çıktısı değildir; bu durumda testin başarısız olması beklenir.
+
+Doğrudan `csc` ile derlemek MSBuild'in referans çözümlemesini ve otomatik
+binding redirect üretimini atlar. Bu yoldaki CS1702, normal proje derlemesinde
+bir paket çakışması olduğunu tek başına göstermez. Paketleri veya sürüm
+numaralarını değiştirerek uyarıyı gidermeye çalışmak yerine yukarıdaki proje
+ve gerçek yükleme kontrolünü kullanın.

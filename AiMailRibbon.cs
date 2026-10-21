@@ -25,6 +25,14 @@ namespace Ask.ai
             grpAiAssistant.Items.Insert(0, compose);
             btnAiReply.SuperTip = "Seçili mail için yanıt hazırlar. Onayınızdan sonra Outlook yanıt taslağını açar; mail göndermez.";
             btnAiReplyAll.SuperTip = "Seçili mail için tümünü yanıtla taslağı hazırlar. Aktarım için onayınızı bekler; mail göndermez.";
+            var summarize = Factory.CreateRibbonButton();
+            summarize.Name = "btnAiSummarize";
+            summarize.Label = "Özetle";
+            summarize.OfficeImageId = "ReviewShowMarkup";
+            summarize.ShowImage = true;
+            summarize.SuperTip = "Seçili mailin özetini, aksiyonlarını ve açık sorularını gösterir; maili değiştirmez.";
+            summarize.Click += async (sender, args) => await MailActionRunner.RunAsync(MailCapability.Summarize, args.Control.Context);
+            grpAiAssistant.Items.Insert(1, summarize);
             new AiRibbonLayout(this, grpAiAssistant, btnAiReply, btnAiReplyAll);
         }
 

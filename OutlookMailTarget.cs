@@ -156,6 +156,8 @@ namespace Ask.ai
 
         public void Apply(string text)
         {
+            if (capability == MailCapability.Summarize)
+                throw new MailActionException("Özetleme maili değiştiremez.");
             // Render completely before any Outlook mutation. Keep the raw response when disabled.
             FormattedMailContent formatted = ApplyMarkdown
                 ? (text == preparedText ? preparedContent : null) ?? MailFormatting.Create(text, true) : null;

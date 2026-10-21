@@ -10,9 +10,12 @@ internal static class PopupLayoutTests
     [STAThread]
     private static void Main(string[] args)
     {
+        BindingRedirectTests.Run();
+        if (args.Length == 1 && args[0] == "--bindings-only") return;
         CheckSettingsSelection();
         CheckMarkdownSettings();
         CheckMemorySettings();
+        CheckSkillSettings();
         CheckRibbonPresetSettings();
         CheckProviderCertificates();
         CheckCertificateRouting();
@@ -20,10 +23,14 @@ internal static class PopupLayoutTests
         RibbonLayoutTests.Run();
         if (args.Length == 1 && args[0] == "--settings-only")
         {
-            Console.WriteLine("Settings checks passed (selection, provider certificate persistence/routing, presets, Markdown, encrypted memory, limits, corrupt records, embedded icon).");
+            Console.WriteLine("Settings checks passed (selection, provider certificate persistence/routing, presets, Markdown, encrypted memory and skills, limits, corrupt records, embedded icon).");
             return;
         }
         Application.EnableVisualStyles();
+        CheckRevisionPreview();
+        CheckSkillInput();
+        CheckBackNavigation();
+        CheckPromptReopening();
         CheckModelChoices();
         CheckSettingsForm();
         using (var input = new MailInputForm(false, true, "Örnek konu"))
@@ -138,6 +145,92 @@ internal static class PopupLayoutTests
         task.GetAwaiter().GetResult();
     }
 
+    private static void CheckBackNavigation()
+    {
+        foreach (string choice in new[] { "&Geri", "&Vazgeç", "&Mail’e aktar", "Close" })
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Test", "Test", false, true, allowBack: true))
+        {
+            progress.Show();
+            var back = FindButton(progress, "&Geri");
+            Check(back != null && back.Visible && !back.Enabled, "Back is visible but unavailable while generating.");
+            back.PerformClick();
+            Check(!progress.WaitForApprovalAsync().IsCompleted && !progress.BackRequested,
+                "Back cannot interrupt generation or resolve approval before the preview is ready.");
+            Ready(progress, "Prepared response");
+            Check(back.Enabled && progress.AcceptButton == null, "Back becomes available without making Enter approve the response.");
+            CheckSizes(progress);
+            progress.Scale(new SizeF(1.5f, 1.5f));
+            CheckSizes(progress);
+            if (choice == "Close") progress.Close();
+            else FindButton(progress, choice).PerformClick();
+            Check(progress.BackRequested == (choice == "&Geri"), "Only Back requests a return to the prompt.");
+            Check(progress.WaitForApprovalAsync().GetAwaiter().GetResult() == (choice == "&Mail’e aktar"),
+                "Back, cancel and closing cannot approve content.");
+            if (choice == "&Mail’e aktar")
+            {
+                Check(!back.Enabled, "Back cannot change the decision once applying starts.");
+                back.PerformClick();
+                Check(!progress.BackRequested && !cancellation.IsCancellationRequested,
+                    "An approved transfer cannot be changed into navigation.");
+            }
+            progress.FinishAndClose();
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Improve", "Test"))
+        {
+            progress.Show();
+            Ready(progress, "Improved selection");
+            Check(!FindButton(progress, "&Geri").Visible, "Flows without a prompt screen do not offer Back.");
+            progress.FinishAndClose();
+        }
+    }
+
+    private static void CheckPromptReopening()
+    {
+        foreach (bool composing in new[] { true, false })
+        using (var input = new MailInputForm(composing, !composing, "Original subject"))
+        {
+            var fields = input.Controls[0].Controls;
+            TextBox subject = null;
+            TextBox instructions = null;
+            foreach (Control control in fields)
+            {
+                var text = control as TextBox;
+                if (text == null) continue;
+                if (text.Multiline) instructions = text;
+                else subject = text;
+            }
+            using (var timer = new System.Windows.Forms.Timer { Interval = 50 })
+            {
+                int visit = 0;
+                timer.Tick += (sender, args) =>
+                {
+                    timer.Stop();
+                    if (visit == 0)
+                    {
+                        if (composing) subject.Text = "Updated subject";
+                        instructions.Text = "  First prompt\r\nSecond line  ";
+                    }
+                    else
+                    {
+                        Check(subject.Text == (composing ? "Updated subject" : "Original subject"), "Returning preserves the subject.");
+                        Check(instructions.Text == "  First prompt\r\nSecond line  ", "Returning preserves the exact prompt, including whitespace.");
+                        Check(subject.ReadOnly == !composing, "Returning does not make a reply subject editable.");
+                        instructions.Text = "Revised prompt";
+                    }
+                    visit++;
+                    FindButton(input, "&Hazırla").PerformClick();
+                };
+                timer.Start();
+                Check(input.ShowDialog() == DialogResult.OK, "The first prompt can be submitted.");
+                timer.Start();
+                Check(input.ShowDialog() == DialogResult.OK && input.Instructions == "Revised prompt",
+                    "The same input window can submit a revised prompt after going back.");
+            }
+        }
+    }
+
     private static void PumpUntil(Func<bool> complete)
     {
         var deadline = DateTime.UtcNow.AddSeconds(10);
@@ -183,6 +276,92 @@ internal static class PopupLayoutTests
             settings.ApplyMarkdown = false;
             settings.Save(path);
             Check(!Askai.AiSettings.Load(path).ApplyMarkdown, "Disabling Markdown persists.");
+        }
+        finally { System.IO.Directory.Delete(folder, true); }
+    }
+
+    private static void CheckRevisionPreview()
+    {
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Preview", "Approval"))
+        {
+            var completion = new TaskCompletionSource<string>();
+            progress.ConfigureRevisions((text, instruction, token) => completion.Task);
+            progress.Show(); Ready(progress, "Original");
+            var revision = progress.ReviseAsync("Shorter");
+            Check(!FindButton(progress, "&Mail’e aktar").Enabled, "Cannot transfer while revision is in flight.");
+            Check(FindPreview(progress).Text == "Original", "Previous successful text stays visible during revision.");
+            completion.SetResult("Revised"); PumpUntil(() => revision.IsCompleted); revision.GetAwaiter().GetResult();
+            Check(progress.SelectedResult == "Revised" && FindPreview(progress).Text == "Revised", "Completed revision becomes selected output.");
+            var undo = progress.RestorePreviousAsync(); PumpUntil(() => undo.IsCompleted); undo.GetAwaiter().GetResult();
+            Check(progress.SelectedResult == "Original" && FindPreview(progress).Text == "Original", "Undo restores preview and transfer text together.");
+            completion = new TaskCompletionSource<string>();
+            revision = progress.ReviseAsync("Try again");
+            completion.SetException(new InvalidOperationException("sensitive transport details"));
+            PumpUntil(() => revision.IsCompleted); revision.GetAwaiter().GetResult();
+            Check(progress.SelectedResult == "Original" && FindButton(progress, "&Mail’e aktar").Enabled,
+                "Failed revision preserves a transferable successful version.");
+            completion = new TaskCompletionSource<string>();
+            revision = progress.ReviseAsync("Late"); progress.Close(); completion.SetResult("Late result");
+            PumpUntil(() => revision.IsCompleted); revision.GetAwaiter().GetResult();
+            Check(progress.SelectedResult == "Original" && !progress.WaitForApprovalAsync().GetAwaiter().GetResult(),
+                "Closing discards late revision and never approves transfer.");
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var summary = new ProgressForm(cancellation, "Summary", "Read only"))
+        {
+            summary.ConfigureSummary(); summary.Show(); Ready(summary, "Summary text");
+            Check(!FindButton(summary, "&Mail’e aktar").Visible && !FindButton(summary, "&Mail’e aktar").Enabled,
+                "Summary offers no transfer action.");
+            summary.Close();
+            Check(!summary.WaitForApprovalAsync().GetAwaiter().GetResult(), "Closing summary cannot write a mail.");
+        }
+    }
+
+    private static void CheckSkillInput()
+    {
+        using (var input = new MailInputForm(true, false, "Topic", Askai.AiSkillCatalog.Defaults()))
+        {
+            input.Show();
+            var selector = (ComboBox)FindControl(input, "SkillSelector");
+            selector.SelectedIndex = 1;
+            FindButton(input, "Talimatı ekle").PerformClick();
+            Check(input.Instructions.Contains("nazikçe reddet"), "Selected skill becomes editable mail instructions.");
+            CheckSizes(input);
+        }
+        using (var host = new Form())
+        using (var editor = new SkillLibraryControl())
+        {
+            host.Controls.Add(editor);
+            host.Show();
+            editor.Skills = Askai.AiSkillCatalog.Defaults();
+            var list = (ListBox)FindControl(editor, "SkillList");
+            list.SelectedIndex = 0; FindButton(editor, "Sil").PerformClick();
+            Check(editor.Skills.Count == 3, "Removing a skill changes the settings draft.");
+        }
+    }
+
+    private static void CheckSkillSettings()
+    {
+        string folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "askai-skills-" + Guid.NewGuid().ToString("N"));
+        string path = System.IO.Path.Combine(folder, "settings.xml");
+        System.IO.Directory.CreateDirectory(folder);
+        try
+        {
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider></AiSettings>");
+            var settings = Askai.AiSettings.Load(path);
+            Check(settings.Skills.Count == 4, "Existing settings receive starter skills.");
+            settings.Skills.Clear();
+            settings.Skills.Add(new Askai.AiSkill("Sentetik beceri", "Sentetik talimat <>&"));
+            settings.Save(path);
+            Check(!System.IO.File.ReadAllText(path).Contains("Sentetik"), "Skill names and instructions are encrypted.");
+            Check(Askai.AiSettings.Load(path).Skills[0].Instructions == "Sentetik talimat <>&", "Skills survive encrypted reload.");
+            settings.Skills.Clear(); settings.Save(path);
+            Check(Askai.AiSettings.Load(path).Skills.Count == 0, "Deleted starters are not recreated.");
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider><Skills>broken</Skills></AiSettings>");
+            bool rejected = false;
+            try { Askai.AiSettings.Load(path); } catch (InvalidOperationException) { rejected = true; }
+            Check(rejected, "Corrupt library is not silently replaced with defaults.");
         }
         finally { System.IO.Directory.Delete(folder, true); }
     }
