@@ -15,6 +15,7 @@ namespace Ask.ai
         private readonly CancellationTokenSource cancellation;
         private readonly TaskCompletionSource<bool> approval = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly Label status = new Label { AutoSize = true, Dock = DockStyle.Fill };
+        private readonly Label footer = new Label { AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 8) };
         private readonly Label action = new Label { AutoSize = true, Dock = DockStyle.Fill };
         private readonly ProgressBar progress = new ProgressBar { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee };
         private readonly Button apply = new Button { Text = "&Mail’e aktar", AutoSize = true, Enabled = false };
@@ -45,6 +46,13 @@ namespace Ask.ai
         private bool completing;
         private bool ready;
         internal FormattedMailContent PreparedContent { get; private set; }
+        private readonly MailRevisionHistory history = new MailRevisionHistory();
+        private Func<string, string, CancellationToken, Task<string>> revise;
+        private readonly FlowLayoutPanel revisionControls = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, Visible = false, Enabled = false };
+        private readonly Button previous = new Button { Text = "Önceki sürüm", AutoSize = true, Enabled = false };
+        private bool revising;
+        private bool readOnlyResult;
+        internal string SelectedResult => history.Current;
         internal bool BackRequested { get; private set; }
 
         public ProgressForm(CancellationTokenSource cancellation, string title, string approvalMessage, bool applyMarkdown = false, bool supportsRichText = true)
@@ -68,7 +76,7 @@ namespace Ask.ai
             MinimizeBox = false;
             var layout = new ResponsiveTableLayoutPanel
             {
-                Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 1, RowCount = 7
+                Dock = DockStyle.Fill, Padding = new Padding(20), ColumnCount = 1, RowCount = 8
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -86,17 +94,16 @@ namespace Ask.ai
                 ? "\nHedef mail düz metin biçiminde. Markdown okunabilir metne dönüştürülecek; kalın yazı ve tablo biçimlendirmesi uygulanamayacak." : "");
             layout.Controls.Add(preview, 0, 3);
             layout.Controls.Add(action, 0, 4);
-            layout.Controls.Add(new Label
-            {
-                Text = "Uygulama mail göndermez. Aktarımdan sonra metni Outlook’ta inceleyip düzenleyebilirsiniz.",
-                AutoSize = true, Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 8)
-            }, 0, 5);
+            footer.Text = "Uygulama mail göndermez. Aktarımdan sonra metni Outlook’ta inceleyip düzenleyebilirsiniz.";
+            layout.Controls.Add(footer, 0, 5);
             var buttons = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             buttons.Controls.Add(cancel);
             buttons.Controls.Add(apply);
             back.Visible = allowBack;
             buttons.Controls.Add(back);
-            layout.Controls.Add(buttons, 0, 6);
+            layout.Controls.Add(revisionControls, 0, 6);
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.Controls.Add(buttons, 0, 7);
             Controls.Add(layout);
             CancelButton = cancel;
             cancel.Click += (sender, args) => Close();
@@ -112,6 +119,7 @@ namespace Ask.ai
                 apply.Enabled = false;
                 cancel.Enabled = false;
                 back.Enabled = false;
+                revisionControls.Enabled = false;
                 applying = true;
                 status.Text = "Onay alındı; içerik Outlook’a aktarılıyor…";
                 approval.TrySetResult(true);
@@ -147,6 +155,8 @@ namespace Ask.ai
             previewFailed = true;
             statusTimer.Stop();
             apply.Enabled = false;
+            back.Enabled = false;
+            revisionControls.Enabled = false;
             status.Text = "Önizleme biçimlendirilemedi. İçerik aktarılmayacak.";
         }
 
@@ -290,6 +300,7 @@ namespace Ask.ai
         private bool BeginCompletion(string result)
         {
             if (IsDisposed || cancellation.IsCancellationRequested) return false;
+            ready = false;
             completing = true;
             statusTimer.Stop();
             if (previewFailed) throw new MailActionException("Önizleme biçimlendirilemedi. Mail değiştirilmedi.");
@@ -318,10 +329,96 @@ namespace Ask.ai
             if (content != null && content.UsedPlainTextFallback)
                 status.Text += " Biçimlendirme sınırı nedeniyle içerik kesilmeden düz metin olarak gösteriliyor ve aktarılacak.";
             cancel.Text = "&Vazgeç";
-            apply.Enabled = true;
-            back.Enabled = true;
+            apply.Enabled = !readOnlyResult && !revising;
+            back.Enabled = !revising;
             ready = true;
+            if (history.Current == null) history.Add(previewBuffer.Source);
+            revisionControls.Enabled = !revising;
+            previous.Enabled = history.CanGoBack;
+            if (readOnlyResult) { status.Text = "Özet hazır. Kaynak mail değiştirilmedi."; cancel.Text = "Kapat"; }
             // No default AcceptButton: finishing generation must not turn an accidental Enter into approval.
+        }
+
+        internal void ConfigureSummary()
+        {
+            readOnlyResult = true;
+            footer.Text = "Bu analiz seçili mailin metnini kullanır. Ekler ve diğer mailler incelenmez. Sonuçları kaynakla karşılaştırın.";
+            apply.Visible = false;
+            back.Visible = false;
+        }
+
+        internal void ConfigureRevisions(Func<string, string, CancellationToken, Task<string>> handler)
+        {
+            revise = handler;
+            revisionControls.Visible = true;
+            foreach (string label in new[] { "Daha kısa", "Daha nazik", "Daha net" })
+            {
+                string instruction = label;
+                var button = new Button { Text = label, AutoSize = true };
+                button.Click += async (sender, args) => await ReviseAsync(instruction);
+                revisionControls.Controls.Add(button);
+            }
+            var instructionBox = new TextBox { Name = "RevisionInstruction", Width = 220, MaxLength = 4000 };
+            var reviseButton = new Button { Text = "Revize et", AutoSize = true };
+            reviseButton.Click += async (sender, args) => await ReviseAsync(instructionBox.Text);
+            previous.Click += async (sender, args) => await RestorePreviousAsync();
+            revisionControls.Controls.Add(instructionBox);
+            revisionControls.Controls.Add(reviseButton);
+            revisionControls.Controls.Add(previous);
+        }
+
+        private void SetRevisionBusy(bool busy)
+        {
+            revising = busy;
+            revisionControls.Enabled = !busy && !previewFailed;
+            apply.Enabled = !busy && !previewFailed && !readOnlyResult;
+            back.Enabled = !busy && !previewFailed;
+            previous.Enabled = history.CanGoBack;
+            if (busy) { status.Text = "Revizyon hazırlanıyor; son başarılı metin korunuyor…"; progress.Style = ProgressBarStyle.Marquee; }
+            else { progress.Style = ProgressBarStyle.Continuous; progress.Value = 100; }
+        }
+
+        internal async Task ReviseAsync(string instruction)
+        {
+            if (!ready || revising || applying || previewFailed || revise == null || cancellation.IsCancellationRequested) return;
+            if (string.IsNullOrWhiteSpace(instruction)) { status.Text = "Revizyon talimatını girin."; return; }
+            string original = history.Current;
+            SetRevisionBusy(true);
+            try
+            {
+                string result = await revise(original, instruction, cancellation.Token);
+                cancellation.Token.ThrowIfCancellationRequested();
+                // Validate before replacing the preview or recording a successful version.
+                if (string.IsNullOrWhiteSpace(result) || result.Length > MailContentLimits.GeneratedCharacters)
+                    throw new MailActionException("Revizyon boş veya çok uzun.");
+                await SetReadyAsync(result);
+                cancellation.Token.ThrowIfCancellationRequested();
+                history.Add(result);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            catch (Exception)
+            {
+                if (!IsDisposed && !cancellation.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await SetReadyAsync(original);
+                        if (!IsDisposed) status.Text = "Revizyon tamamlanamadı. Son başarılı metin korundu; yeniden deneyebilirsiniz.";
+                    }
+                    catch (Exception) { if (!IsDisposed) FailPreview(); }
+                }
+            }
+            finally { if (!IsDisposed && !cancellation.IsCancellationRequested) SetRevisionBusy(false); }
+        }
+
+        internal async Task RestorePreviousAsync()
+        {
+            if (!ready || revising || applying || previewFailed || !history.CanGoBack || cancellation.IsCancellationRequested) return;
+            SetRevisionBusy(true);
+            try { await SetReadyAsync(history.Previous()); }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            catch (Exception) { if (!IsDisposed) FailPreview(); }
+            finally { if (!IsDisposed && !cancellation.IsCancellationRequested) SetRevisionBusy(false); }
         }
 
         public Task<bool> WaitForApprovalAsync() { return approval.Task; }

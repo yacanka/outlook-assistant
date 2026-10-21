@@ -205,10 +205,12 @@
     <Compile Include="AssistantIcon.cs" />
     <Compile Include="AiService.cs" />
     <Compile Include="MailGeneration.cs" />
+    <Compile Include="AiSkill.cs" />
     <Compile Include="MailFormatting.cs" />
     <Compile Include="OutlookMailTarget.cs" />
     <Compile Include="MailActionRunner.cs" />
     <Compile Include="MailInputForm.cs" />
+    <Compile Include="SkillLibraryControl.cs" />
     <Compile Include="ResponsiveTableLayoutPanel.cs" />
     <Compile Include="AiInspectorRibbons.cs" />
     <Compile Include="AiRibbonLayout.cs" />

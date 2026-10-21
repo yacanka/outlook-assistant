@@ -10,9 +10,12 @@ internal static class PopupLayoutTests
     [STAThread]
     private static void Main(string[] args)
     {
+        BindingRedirectTests.Run();
+        if (args.Length == 1 && args[0] == "--bindings-only") return;
         CheckSettingsSelection();
         CheckMarkdownSettings();
         CheckMemorySettings();
+        CheckSkillSettings();
         CheckRibbonPresetSettings();
         CheckProviderCertificates();
         CheckCertificateRouting();
@@ -20,10 +23,12 @@ internal static class PopupLayoutTests
         RibbonLayoutTests.Run();
         if (args.Length == 1 && args[0] == "--settings-only")
         {
-            Console.WriteLine("Settings checks passed (selection, provider certificate persistence/routing, presets, Markdown, encrypted memory, limits, corrupt records, embedded icon).");
+            Console.WriteLine("Settings checks passed (selection, provider certificate persistence/routing, presets, Markdown, encrypted memory and skills, limits, corrupt records, embedded icon).");
             return;
         }
         Application.EnableVisualStyles();
+        CheckRevisionPreview();
+        CheckSkillInput();
         CheckBackNavigation();
         CheckPromptReopening();
         CheckModelChoices();
@@ -271,6 +276,92 @@ internal static class PopupLayoutTests
             settings.ApplyMarkdown = false;
             settings.Save(path);
             Check(!Askai.AiSettings.Load(path).ApplyMarkdown, "Disabling Markdown persists.");
+        }
+        finally { System.IO.Directory.Delete(folder, true); }
+    }
+
+    private static void CheckRevisionPreview()
+    {
+        using (var cancellation = new CancellationTokenSource())
+        using (var progress = new ProgressForm(cancellation, "Preview", "Approval"))
+        {
+            var completion = new TaskCompletionSource<string>();
+            progress.ConfigureRevisions((text, instruction, token) => completion.Task);
+            progress.Show(); Ready(progress, "Original");
+            var revision = progress.ReviseAsync("Shorter");
+            Check(!FindButton(progress, "&Mail’e aktar").Enabled, "Cannot transfer while revision is in flight.");
+            Check(FindPreview(progress).Text == "Original", "Previous successful text stays visible during revision.");
+            completion.SetResult("Revised"); PumpUntil(() => revision.IsCompleted); revision.GetAwaiter().GetResult();
+            Check(progress.SelectedResult == "Revised" && FindPreview(progress).Text == "Revised", "Completed revision becomes selected output.");
+            var undo = progress.RestorePreviousAsync(); PumpUntil(() => undo.IsCompleted); undo.GetAwaiter().GetResult();
+            Check(progress.SelectedResult == "Original" && FindPreview(progress).Text == "Original", "Undo restores preview and transfer text together.");
+            completion = new TaskCompletionSource<string>();
+            revision = progress.ReviseAsync("Try again");
+            completion.SetException(new InvalidOperationException("sensitive transport details"));
+            PumpUntil(() => revision.IsCompleted); revision.GetAwaiter().GetResult();
+            Check(progress.SelectedResult == "Original" && FindButton(progress, "&Mail’e aktar").Enabled,
+                "Failed revision preserves a transferable successful version.");
+            completion = new TaskCompletionSource<string>();
+            revision = progress.ReviseAsync("Late"); progress.Close(); completion.SetResult("Late result");
+            PumpUntil(() => revision.IsCompleted); revision.GetAwaiter().GetResult();
+            Check(progress.SelectedResult == "Original" && !progress.WaitForApprovalAsync().GetAwaiter().GetResult(),
+                "Closing discards late revision and never approves transfer.");
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var summary = new ProgressForm(cancellation, "Summary", "Read only"))
+        {
+            summary.ConfigureSummary(); summary.Show(); Ready(summary, "Summary text");
+            Check(!FindButton(summary, "&Mail’e aktar").Visible && !FindButton(summary, "&Mail’e aktar").Enabled,
+                "Summary offers no transfer action.");
+            summary.Close();
+            Check(!summary.WaitForApprovalAsync().GetAwaiter().GetResult(), "Closing summary cannot write a mail.");
+        }
+    }
+
+    private static void CheckSkillInput()
+    {
+        using (var input = new MailInputForm(true, false, "Topic", Askai.AiSkillCatalog.Defaults()))
+        {
+            input.Show();
+            var selector = (ComboBox)FindControl(input, "SkillSelector");
+            selector.SelectedIndex = 1;
+            FindButton(input, "Talimatı ekle").PerformClick();
+            Check(input.Instructions.Contains("nazikçe reddet"), "Selected skill becomes editable mail instructions.");
+            CheckSizes(input);
+        }
+        using (var host = new Form())
+        using (var editor = new SkillLibraryControl())
+        {
+            host.Controls.Add(editor);
+            host.Show();
+            editor.Skills = Askai.AiSkillCatalog.Defaults();
+            var list = (ListBox)FindControl(editor, "SkillList");
+            list.SelectedIndex = 0; FindButton(editor, "Sil").PerformClick();
+            Check(editor.Skills.Count == 3, "Removing a skill changes the settings draft.");
+        }
+    }
+
+    private static void CheckSkillSettings()
+    {
+        string folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "askai-skills-" + Guid.NewGuid().ToString("N"));
+        string path = System.IO.Path.Combine(folder, "settings.xml");
+        System.IO.Directory.CreateDirectory(folder);
+        try
+        {
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider></AiSettings>");
+            var settings = Askai.AiSettings.Load(path);
+            Check(settings.Skills.Count == 4, "Existing settings receive starter skills.");
+            settings.Skills.Clear();
+            settings.Skills.Add(new Askai.AiSkill("Sentetik beceri", "Sentetik talimat <>&"));
+            settings.Save(path);
+            Check(!System.IO.File.ReadAllText(path).Contains("Sentetik"), "Skill names and instructions are encrypted.");
+            Check(Askai.AiSettings.Load(path).Skills[0].Instructions == "Sentetik talimat <>&", "Skills survive encrypted reload.");
+            settings.Skills.Clear(); settings.Save(path);
+            Check(Askai.AiSettings.Load(path).Skills.Count == 0, "Deleted starters are not recreated.");
+            System.IO.File.WriteAllText(path, "<AiSettings><Provider>Central</Provider><Skills>broken</Skills></AiSettings>");
+            bool rejected = false;
+            try { Askai.AiSettings.Load(path); } catch (InvalidOperationException) { rejected = true; }
+            Check(rejected, "Corrupt library is not silently replaced with defaults.");
         }
         finally { System.IO.Directory.Delete(folder, true); }
     }

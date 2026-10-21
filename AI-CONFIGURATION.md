@@ -256,6 +256,42 @@ yayın çıktısında NuGet bağımlılıklarıyla `Ask.ai.dll.config` dosyasın
 kontrol edin. Birden fazla sürümün elle eklenmesi veya eski DLL'lerin tek tek
 taşınması aynı problemi yeniden oluşturabilir.
 
+### Doğrudan derleyici kontrolündeki CS1702 uyarısı
+
+`System.Text.Json` 9.0.0'ın .NET Framework assembly'si `System.Memory`
+**4.0.1.2** kimliğine referans verir. Markdig 1.4.0'ın istediği NuGet paketi
+**System.Memory 4.6.3**, **4.0.5.0** assembly kimliğini taşır. Paket sürümü ile
+assembly sürümü farklı kavramlardır; bu farklılık tek başına uyumsuz API veya
+bozuk kurulum anlamına gelmez.
+
+Özellik çalışmasında bildirilen CS1702, proje dışındaki geçici bir `csc`
+derleme kontrolünde yeniden üretildi. Normal MSBuild derlemesi bağımlılıkları
+birleştirir ve `0.0.0.0–4.0.5.0 → 4.0.5.0` yönlendirmesini çıktı config'ine
+üretir. İncelenen MSBuild araç zinciri, otomatik yönlendirme açıkken CS1701/CS1702
+derleyici bildirimlerini de kendi standart hedefleri üzerinden yönetir.
+Bu nedenle yalnızca uyarısız derlemeye bakmak yerine üretilen config'in ve
+çalışma zamanında yüklenen DLL'in birlikte doğrulanması gerekir.
+
+Paket yükseltme/düşürme, elle DLL kopyalama veya projeye ek `NoWarn` ayarı
+uygulanmadı. Üretim projesinin mevcut yönlendirme ayarları korundu; test
+projesinde aynı ayarlar açıkça belirtildi. Doğrulama için proje üzerinden
+Rebuild kullanın; tek başına `csc` çağrısı NuGet/MSBuild çözümlemesinin ve
+kurulum paketinin doğrulaması değildir.
+
+```powershell
+msbuild tests/PopupLayout/PopupLayoutTests.csproj /t:Restore,Rebuild /verbosity:minimal
+& tests/PopupLayout/bin/PopupLayoutTests.exe --bindings-only
+```
+
+Bu regresyon testi üretilen config'in varlığını, yönlendirmenin JSON
+assembly'sinin istediği eski sürümü kapsamasını, hedef sürümün çıktıdaki DLL
+ile eşleşmesini ve gerçek çalışma zamanı çözümlemesini doğrular. Aynı süreçte
+JSON okuma ve Markdown dönüşümü de çalıştırılır. Config eksikse test başarısız
+olur. macOS'ta Mono ile çalıştırılabilen bu kontrol, Windows VSTO yükleme/yayın
+kontrolünün yerine geçmez; `Ask.ai.dll.config` üretim paketine dahil olmalıdır.
+
+Referans: [Microsoft — otomatik binding redirect üretimi](https://learn.microsoft.com/en-us/dotnet/framework/configure-apps/how-to-enable-and-disable-automatic-binding-redirection).
+
 Tanı testlerini sertifika testlerinden bağımsız çalıştırmak için:
 
 ```sh
@@ -501,3 +537,44 @@ başarılı aktarımı başarısız sayıp yeni taslağı silmez; içerik/yol lo
 Word geri alma API'sinin çalışma biçimi için
 [Microsoft UndoRecord belgesi](https://learn.microsoft.com/en-us/office/vba/word/concepts/working-with-word/working-with-the-undorecord-object)
 temel alınmıştır; gerçek Outlook davranışı Windows üzerinde doğrulanmalıdır.
+
+## Özetleme, revizyon ve kişisel beceriler
+
+- **Özetle:** Ana Outlook ve mail okuma penceresinde tek bir alınmış/gönderilmiş
+  mail için kısa özet, aksiyonlar (iş, sorumlu, tarih) ve açık sorular üretir.
+  Kaynakta olmayan bilgiler için “Belirtilmemiş” istenir. Sonuç salt okunurdur;
+  mail aktarım düğmesi yoktur ve aktarım katmanı da özetin taslak oluşturmasını
+  reddeder. Yalnız seçili mailin gövdesi kullanılır; ekler veya başka mailler
+  okunmaz. AI bulgularını kaynakla karşılaştırın.
+- **Önizlemede revizyon:** Mail hazırlama, iyileştirme ve yanıt önizlemelerinde
+  **Daha kısa / Daha nazik / Daha net**, serbest talimat ve **Önceki sürüm**
+  bulunur. Revizyon sırasında son başarılı metin görünür kalır ve aktarım
+  kilitlenir. Yeni sonuç tamamen hazırlanırsa önizlemeye geçer; hata durumunda
+  son başarılı sonuç korunur. Önceki sürüme dönmek, en son sürümü geçmişten
+  çıkarır. Oturumda son 10 başarılı sürüm bellekte tutulur; diske kaydedilmez.
+  Pencere kapatılırsa bekleyen sonuç aktarılmaz. Onayda yalnızca seçili sürüm
+  aktarılır; kaynak taslağın değişip değişmediği yeniden denetlenir.
+- **Ayarlar → Beceriler:** En fazla 30 kişisel talimat kaydedilebilir. Ad sınırı
+  80, talimat sınırı 4.000 karakterdir; adlar büyük/küçük harften bağımsız
+  benzersiz olmalıdır. **Ekle / Düzenle / Sil** ayar taslağını değiştirir;
+  kalıcı kayıt için ana Ayarlar penceresinde **Kaydet** gerekir. Vazgeç
+  değişiklikleri saklamaz. İlk kullanımda dört örnek beceri gelir; tümünü silip
+  kaydetmek boş kütüphaneyi korur. Mail Hazırla / Yanıtla / Tümünü Yanıtla
+  girişinde beceriyi seçip **Talimatı ekle** ile düzenlenebilir talimata ekleyin.
+  Birleşik talimat 4.000 karakteri aşarsa ekleme reddedilir; metin kırpılmaz.
+
+Beceri adları ve talimatları mevcut `settings.xml` içindeki `Skills` alanında
+Windows DPAPI CurrentUser ile birlikte şifrelenir. Eski kayıtlarda bu alan
+olmadığında örnekler yüklenir; bozuk şifreli kayıt sessizce sıfırlanmaz.
+Yalnızca seçip talimata eklediğiniz beceri AI servisine gönderilir. Revizyon
+isteği kaynak bağlamını, mevcut sürümü, kişisel hafızayı (etkinse) ve revizyon
+talimatını seçili servise iletir. Yeni bağımlılık veya otomatik gönderim eklenmez.
+
+Platform bağımsız regresyonlar `tests/TransportTests.csproj` içinde özetleme
+promptunu, salt okunur Outlook sınırını, revizyon verilerini/geçmişini ve özel
+karakterli en büyük beceri kütüphanesinin kayıt biçimini kapsar.
+`tests/PopupLayout` içinde şifreli beceri kayıtları, şerit yönlendirmesi,
+beceri seçimi, revizyon başarısı/hatası/iptali ve önceki sürüme dönüş kontrolleri
+bulunur. WinForms etkileşim testleri ve gerçek Outlook/VSTO derlemesi Windows
+üzerinde çalıştırılmalıdır; Mono derleme ve Office simülasyonları bunların
+yerine geçmez.

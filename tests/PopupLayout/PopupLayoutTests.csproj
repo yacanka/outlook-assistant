@@ -2,6 +2,9 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <!-- Match the VSTO project's generated runtime policy; never hand-copy dependency DLLs. -->
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
     <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <OutputPath>bin\</OutputPath>
     <AssemblyName>PopupLayoutTests</AssemblyName>
@@ -24,6 +27,7 @@
     <Compile Include="..\..\LegacyAiService.cs" />
     <Compile Include="..\..\AppConfig.cs" />
     <Compile Include="..\..\MailGeneration.cs" />
+    <Compile Include="..\..\AiSkill.cs" />
     <Compile Include="..\..\MailFormatting.cs" />
     <Compile Include="..\..\AiBrand.cs" />
     <Compile Include="..\..\AssistantIcon.cs" />
@@ -35,6 +39,7 @@
     <Compile Include="..\..\CertificateValidation.cs" />
     <Compile Include="..\..\AiConnectionErrors.cs" />
     <Compile Include="PopupLayoutTests.cs" />
+    <Compile Include="BindingRedirectTests.cs" />
     <Compile Include="RibbonSimulation.cs" />
     <Compile Include="RibbonLayoutTests.cs" />
     <Compile Include="..\..\AiRibbonLayout.cs" />
@@ -43,6 +48,7 @@
     <Compile Include="..\..\AiInspectorRibbons.cs" />
     <Compile Include="..\..\ResponsiveTableLayoutPanel.cs" />
     <Compile Include="..\..\MailInputForm.cs" />
+    <Compile Include="..\..\SkillLibraryControl.cs" />
     <Compile Include="..\..\ProgressForm.cs" />
     <Compile Include="..\..\ProgressForm.Designer.cs" />
   </ItemGroup>

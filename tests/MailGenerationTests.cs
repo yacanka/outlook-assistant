@@ -5,6 +5,7 @@ internal static class MailGenerationTests
 {
     public static void Run()
     {
+        CheckNewCapabilities();
         CheckMemoryPrompts();
         var target = new DraftTarget();
         var session = new MailGenerationSession();
@@ -70,6 +71,47 @@ internal static class MailGenerationTests
         Check(MailText.SelectionContent("\r\r", out start, out end) == "" && start == end,
             "boundary-only selection cannot rewrite surrounding text");
         Console.WriteLine("Mail generation checks passed (approval, cancellation, stale target, failure, prompts).");
+    }
+
+    private static void CheckNewCapabilities()
+    {
+        var summary = new MailGenerationRequest(MailCapability.Summarize, "Topic", "Please review", "").BuildPrompt();
+        Check(summary.Contains("Belirtilmemiş") && summary.Contains("sorumlu"), "Summary requires explicit unknowns and actions.");
+        var request = new MailGenerationRequest(MailCapability.Reply, "Topic", "Original facts", "Decline");
+        var revised = request.BuildRevisionPrompt("Existing draft", "Shorten");
+        using (var json = System.Text.Json.JsonDocument.Parse(revised.Substring(revised.LastIndexOf('\n') + 1)))
+        {
+            Check(json.RootElement.GetProperty("draft").GetString() == "Existing draft", "Revision carries the selected version.");
+            Check(json.RootElement.GetProperty("revision").GetString() == "Shorten", "Revision instruction stays separate from source.");
+        }
+        Throws<MailActionException>(() => request.BuildRevisionPrompt("Draft", " "));
+        Throws<MailActionException>(() => request.BuildRevisionPrompt(new string('x', 64001), "Shorten"));
+        var history = new MailRevisionHistory();
+        history.Add("First"); history.Add("Second");
+        Throws<MailActionException>(() => history.Add(" "));
+        Check(history.Current == "Second", "Failed revision preserves last successful text.");
+        Check(history.Previous() == "First" && !history.CanGoBack, "Previous restores initial text.");
+        history.Add("Alternative");
+        Check(history.Current == "Alternative" && history.Previous() == "First", "Revision after undo starts a new branch.");
+        var skills = AiSkillCatalog.Defaults();
+        skills[0] = new AiSkill("Fixture", "Line one\nÖrnek <instruction>");
+        var loaded = AiSkillCatalog.Deserialize(AiSkillCatalog.Serialize(skills));
+        Check(loaded[0].Name == "Fixture" && loaded[0].Instructions == "Line one\nÖrnek <instruction>", "Skill text round-trips safely.");
+        Check(AiSkillCatalog.Deserialize(AiSkillCatalog.Serialize(new System.Collections.Generic.List<AiSkill>())).Count == 0,
+            "Deleting all skills persists an empty library.");
+        skills.Add(new AiSkill("fixture", "Duplicate"));
+        Throws<ArgumentException>(() => AiSkillCatalog.Serialize(skills));
+        Throws<ArgumentException>(() => new AiSkill(" ", "Text"));
+        var fullLibrary = new System.Collections.Generic.List<AiSkill>();
+        for (int i = 0; i < 30; i++) fullLibrary.Add(new AiSkill("Skill " + i, new string('&', 4000)));
+        Check(AiSkillCatalog.Deserialize(AiSkillCatalog.Serialize(fullLibrary))[29].Instructions.Length == 4000,
+            "Maximum valid library survives XML escaping without becoming unreadable.");
+        fullLibrary.Add(new AiSkill("Too many", "Instruction"));
+        Throws<ArgumentException>(() => AiSkillCatalog.Serialize(fullLibrary));
+        for (int i = 0; i < 15; i++) history.Add("Version " + i);
+        int undoCount = 0;
+        while (history.CanGoBack) { history.Previous(); undoCount++; }
+        Check(undoCount == 9 && history.Current == "Version 5", "Revision history retains only the last ten successful versions.");
     }
 
     private static void CheckMemoryPrompts()
